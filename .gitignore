@@ -1,0 +1,27 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyTorch and Torchvision dataset download cache
+data/cache/
+
+# Generated Parquet shards and local DuckDB databases
+data/clients/
+data/*.parquet
+data/*.duckdb
+*.duckdb
+*.duckdb.wal
+*.duckdb.tmp
+
+# Environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE and OS metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
