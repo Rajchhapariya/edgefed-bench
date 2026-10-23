@@ -1,5 +1,4 @@
-"""Formal Unit Test Suite for Byzantine Adversaries and Robust Aggregation.
-"""
+"""Unit test suite for Byzantine adversaries and robust aggregation."""
 
 import unittest
 import numpy as np
@@ -10,7 +9,7 @@ from engine.quantization import Int8Quantizer
 
 
 class TestAdversaryAndAggregator(unittest.TestCase):
-    """Rigorous verification of Byzantine attacks and defensive aggregators."""
+    """Verification of Byzantine attack vectors and defensive aggregators."""
 
     def setUp(self):
         self.rng = np.random.default_rng(42)
@@ -100,9 +99,7 @@ class TestAdversaryAndAggregator(unittest.TestCase):
         self.assertGreater(byzantine_min_score, honest_max_score)
 
     def test_05_quantized_multi_krum_defense_resilience(self):
-        """Core Research Question Unit Test:
-        Verify Multi-Krum still isolates all Byzantine nodes under INT8 quantization noise.
-        """
+        """Verify Multi-Krum still isolates all Byzantine nodes under INT8 quantization noise."""
         byz_ids = [0, 1, 2, 3]
         poisoned_updates, _ = ByzantineAdversary.corrupt_client_updates(
             self.honest_updates,

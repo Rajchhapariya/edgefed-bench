@@ -143,7 +143,7 @@ class DataPartitioner:
         """
         generated_paths = []
 
-        # 1. Export each client partition
+        # Export individual client partition shards
         for client_id, indices in client_partitions.items():
             client_features = x_train[indices]
             client_labels = y_train[indices]
@@ -163,7 +163,7 @@ class DataPartitioner:
             pq.write_table(table, str(out_path), compression="snappy")
             generated_paths.append(str(out_path.resolve()))
 
-        # 2. Export global test set
+        # Export global test set partition
         test_table = pa.Table.from_arrays(
             [
                 pa.array(range(len(y_test)), type=pa.int64()),

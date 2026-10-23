@@ -133,11 +133,8 @@ class RobustAggregator:
         # Calculate Krum score for each client
         scores = np.zeros(num_clients, dtype=np.float64)
         for i in range(num_clients):
-            # Exclude self distance (index i)
             other_distances = np.delete(dist_matrix[i], i)
-            # Sort distances ascending
             sorted_distances = np.sort(other_distances)
-            # Sum distances to the (N - f - 2) closest neighbors
             scores[i] = np.sum(sorted_distances[:num_neighbors])
 
         # Multi-Krum: Select m clients with smallest Krum scores

@@ -110,7 +110,7 @@ def run_regime(
         round_start_time = time.time()
         current_weights = global_model.get_flat_parameters()
 
-        # 1. Edge computation: clients perform local training
+        # Local client edge training
         client_updates = []
         for client in clients:
             upd = client.train_round(current_weights, quantize=quantize)
@@ -130,10 +130,10 @@ def run_regime(
                 local_loss=upd.local_loss,
             )
 
-        # 2. Extract raw update vectors
+        # Parameter update vector extraction
         raw_vectors = [u.update for u in client_updates]
 
-        # 3. Byzantine attack injection
+        # Byzantine adversarial corruption
         if num_byzantine > 0:
             corrupted_vectors, _ = ByzantineAdversary.corrupt_client_updates(
                 raw_vectors,
@@ -145,7 +145,7 @@ def run_regime(
         else:
             corrupted_vectors = raw_vectors
 
-        # 4. Server-side aggregation
+        # Server-side robust aggregation
         if aggregation_method == "FedAvg":
             aggregated_vector = RobustAggregator.fed_avg(corrupted_vectors)
         elif aggregation_method == "Multi-Krum":
@@ -167,11 +167,11 @@ def run_regime(
         else:
             raise ValueError(f"Unknown aggregation method: {aggregation_method}")
 
-        # 5. Global model parameter update: w_{t+1} = w_t + v_agg
+        # Model parameter update: w_{t+1} = w_t + v_agg
         new_weights = current_weights + aggregated_vector
         global_model.set_flat_parameters(new_weights)
 
-        # 6. Global evaluation on test set
+        # Global evaluation on held-out test partition
         acc, test_loss = evaluate_global_model(global_model, x_test, y_test)
         history_accuracy.append(acc)
         history_loss.append(test_loss)
@@ -318,7 +318,6 @@ def main():
     telemetry.close()
     store.close()
 
-    # Print summary table
     print("\n" + "=" * 105)
     print("FINAL BENCHMARK COMPARISON TABLE")
     print("=" * 105)

@@ -1,12 +1,13 @@
 """Unit Test Suite for Benchmark Simulation Engine.
 """
 
+import os
 import unittest
 import numpy as np
 import torch
 
 from engine.client import EdgeClassifier
-from engine.storage import EdgeStore, TelemetryEngine
+from engine.storage import EdgeStore, TelemetryEngine, initialize_storage_pipeline
 from simulate import evaluate_global_model, run_regime
 
 

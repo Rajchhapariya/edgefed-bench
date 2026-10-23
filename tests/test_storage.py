@@ -1,5 +1,4 @@
-"""Formal Unit Test Suite for Storage, Parquet Sharding, and DuckDB Telemetry.
-"""
+"""Unit test suite for storage, Parquet sharding, and DuckDB telemetry."""
 
 import os
 import unittest
@@ -10,7 +9,7 @@ from engine.storage import DataPartitioner, EdgeStore, TelemetryEngine, initiali
 
 
 class TestStoragePipeline(unittest.TestCase):
-    """Rigorous verification of the data engineering and storage layer."""
+    """Tests verifying data partitioning, Parquet I/O, and DuckDB telemetry."""
 
     @classmethod
     def setUpClass(cls):

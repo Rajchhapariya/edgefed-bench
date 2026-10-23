@@ -1,5 +1,4 @@
-"""Formal Unit Test Suite for INT8 Quantization and Edge Client Optimization.
-"""
+"""Unit test suite for INT8 quantization and edge client optimization."""
 
 import unittest
 import numpy as np
@@ -11,7 +10,7 @@ from engine.storage import EdgeStore
 
 
 class TestQuantizationAndClient(unittest.TestCase):
-    """Rigorous verification of the quantization engine and edge client training."""
+    """Tests verifying INT8 bounds, quantization noise, and edge training."""
 
     def test_01_quantize_dequantize_bounds(self):
         """Verify INT8 quantization produces int8 types within [-127, 127] and strictly bounded error."""
