@@ -102,7 +102,7 @@ class TestQuantizationAndClient(unittest.TestCase):
         client = EdgeClient(client_id=0, store=store, lr=0.01, batch_size=128, local_epochs=1)
         global_params = client.model.get_flat_parameters()
 
-        # 1. Unquantized training round
+        # Baseline unquantized training round
         update_fp32 = client.train_round(global_params, quantize=False)
         self.assertFalse(update_fp32.quantized)
         self.assertEqual(len(update_fp32.update), 101770)
@@ -111,7 +111,7 @@ class TestQuantizationAndClient(unittest.TestCase):
         self.assertGreater(update_fp32.local_loss, 0.0)
         self.assertIsNone(update_fp32.noise_metrics)
 
-        # 2. Quantized training round
+        # Quantized training round evaluation
         update_int8 = client.train_round(global_params, quantize=True)
         self.assertTrue(update_int8.quantized)
         self.assertEqual(len(update_int8.update), 101770)
