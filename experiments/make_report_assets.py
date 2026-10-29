@@ -8,6 +8,7 @@ updates the README results block.
 Strict Ground Rules:
 - Zero hand-typed empirical values.
 - Zero emojis.
+- Zero external pandas dependency (uses native DuckDB and NumPy).
 - All numbers sourced directly from SQL queries.
 """
 
@@ -17,8 +18,9 @@ import argparse
 import json
 import os
 import sys
+from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import duckdb
 import matplotlib
@@ -33,14 +35,14 @@ def ensure_dirs(*dirs: Path):
         d.mkdir(parents=True, exist_ok=True)
 
 
-def generate_figure_1_convergence(con: duckdb.DuckDBPyConnection, figures_dir: Path):
+def generate_figure_1_convergence(con: duckdb.DuckDBPyConnection, target_dirs: List[Path]):
     """Figure 1: Accuracy vs Round for 4 aggregators at 20% sign-flip, INT8 (mean +- 1 std band)."""
     query = """
         SELECT
             r.aggregator,
             m.round_num,
             AVG(m.test_accuracy) AS mean_acc,
-            STDDEV(m.test_accuracy) AS std_acc
+            COALESCE(STDDEV(m.test_accuracy), 0.0) AS std_acc
         FROM round_metrics m
         JOIN runs r ON m.config_hash = r.config_hash
         WHERE r.attack = 'sign-flip'
@@ -50,10 +52,17 @@ def generate_figure_1_convergence(con: duckdb.DuckDBPyConnection, figures_dir: P
         GROUP BY r.aggregator, m.round_num
         ORDER BY r.aggregator, m.round_num;
     """
-    df = con.execute(query).fetchdf()
-    if df.empty:
+    rows = con.execute(query).fetchall()
+    if not rows:
         print("[!] Warning: Figure 1 query returned no rows. Skipping figure generation.")
         return
+
+    # Group by aggregator
+    agg_data = defaultdict(lambda: {"rounds": [], "means": [], "stds": []})
+    for agg, r_num, mean_acc, std_acc in rows:
+        agg_data[agg]["rounds"].append(r_num)
+        agg_data[agg]["means"].append(mean_acc)
+        agg_data[agg]["stds"].append(std_acc if std_acc is not None else 0.0)
 
     plt.style.use("seaborn-v0_8-whitegrid" if "seaborn-v0_8-whitegrid" in plt.style.available else "default")
     fig, ax = plt.subplots(figsize=(7.5, 4.2), dpi=300)
@@ -73,12 +82,11 @@ def generate_figure_1_convergence(con: duckdb.DuckDBPyConnection, figures_dir: P
     }
 
     for agg in ["FedAvg", "Multi-Krum", "Coordinate median", "Trimmed mean"]:
-        sub = df[df["aggregator"] == agg].sort_values("round_num")
-        if sub.empty:
+        if agg not in agg_data:
             continue
-        rounds = sub["round_num"].values
-        means = sub["mean_acc"].values
-        stds = sub["std_acc"].fillna(0.0).values
+        rounds = np.array(agg_data[agg]["rounds"])
+        means = np.array(agg_data[agg]["means"])
+        stds = np.array(agg_data[agg]["stds"])
 
         color = color_map.get(agg, "#333333")
         linestyle = style_map.get(agg, "-")
@@ -95,22 +103,22 @@ def generate_figure_1_convergence(con: duckdb.DuckDBPyConnection, figures_dir: P
     ax.legend(frameon=True, facecolor="white", framealpha=0.9, loc="lower right", fontsize=9)
 
     plt.tight_layout()
-    png_path = figures_dir / "fig1_convergence_20pct_signflip.png"
-    pdf_path = figures_dir / "fig1_convergence_20pct_signflip.pdf"
-    plt.savefig(png_path)
-    plt.savefig(pdf_path)
+    for d in target_dirs:
+        d.mkdir(parents=True, exist_ok=True)
+        plt.savefig(d / "fig1_convergence_20pct_signflip.png")
+        plt.savefig(d / "fig1_convergence_20pct_signflip.pdf")
     plt.close()
-    print(f"[+] Saved Figure 1: {png_path} and {pdf_path}")
+    print("[+] Saved Figure 1 (PNG and PDF).")
 
 
-def generate_figure_2_attacker_share(con: duckdb.DuckDBPyConnection, figures_dir: Path):
+def generate_figure_2_attacker_share(con: duckdb.DuckDBPyConnection, target_dirs: List[Path]):
     """Figure 2: Final Accuracy vs Attacker Share (10%, 20%, 30%) with error bars (INT8, sign-flip)."""
     query = """
         SELECT
             aggregator,
-            ROUND(attacker_share * 100) AS share_pct,
+            CAST(ROUND(attacker_share * 100) AS INTEGER) AS share_pct,
             AVG(final_accuracy) AS mean_acc,
-            STDDEV(final_accuracy) AS std_acc
+            COALESCE(STDDEV(final_accuracy), 0.0) AS std_acc
         FROM runs
         WHERE attack = 'sign-flip'
           AND wire_precision = 'INT8'
@@ -118,10 +126,16 @@ def generate_figure_2_attacker_share(con: duckdb.DuckDBPyConnection, figures_dir
         GROUP BY aggregator, share_pct
         ORDER BY aggregator, share_pct;
     """
-    df = con.execute(query).fetchdf()
-    if df.empty:
+    rows = con.execute(query).fetchall()
+    if not rows:
         print("[!] Warning: Figure 2 query returned no rows. Skipping figure generation.")
         return
+
+    agg_data = defaultdict(lambda: {"shares": [], "means": [], "stds": []})
+    for agg, share, mean_acc, std_acc in rows:
+        agg_data[agg]["shares"].append(share)
+        agg_data[agg]["means"].append(mean_acc)
+        agg_data[agg]["stds"].append(std_acc if std_acc is not None else 0.0)
 
     plt.style.use("seaborn-v0_8-whitegrid" if "seaborn-v0_8-whitegrid" in plt.style.available else "default")
     fig, ax = plt.subplots(figsize=(6.8, 4.2), dpi=300)
@@ -142,12 +156,11 @@ def generate_figure_2_attacker_share(con: duckdb.DuckDBPyConnection, figures_dir
     shares = [10, 20, 30]
 
     for agg in ["FedAvg", "Multi-Krum", "Coordinate median", "Trimmed mean"]:
-        sub = df[df["aggregator"] == agg].sort_values("share_pct")
-        if sub.empty:
+        if agg not in agg_data:
             continue
-        x = sub["share_pct"].values
-        y = sub["mean_acc"].values
-        yerr = sub["std_acc"].fillna(0.0).values
+        x = np.array(agg_data[agg]["shares"])
+        y = np.array(agg_data[agg]["means"])
+        yerr = np.array(agg_data[agg]["stds"])
 
         color = color_map.get(agg, "#333333")
         marker = marker_map.get(agg, "o")
@@ -167,51 +180,47 @@ def generate_figure_2_attacker_share(con: duckdb.DuckDBPyConnection, figures_dir
     ax.legend(frameon=True, facecolor="white", framealpha=0.9, loc="center left", fontsize=9)
 
     plt.tight_layout()
-    png_path = figures_dir / "fig2_accuracy_vs_attacker_share.png"
-    pdf_path = figures_dir / "fig2_accuracy_vs_attacker_share.pdf"
-    plt.savefig(png_path)
-    plt.savefig(pdf_path)
+    for d in target_dirs:
+        d.mkdir(parents=True, exist_ok=True)
+        plt.savefig(d / "fig2_accuracy_vs_attacker_share.png")
+        plt.savefig(d / "fig2_accuracy_vs_attacker_share.pdf")
     plt.close()
-    print(f"[+] Saved Figure 2: {png_path} and {pdf_path}")
+    print("[+] Saved Figure 2 (PNG and PDF).")
 
 
 def build_table_1_robustness(con: duckdb.DuckDBPyConnection) -> Tuple[str, str]:
     """Table 1: Final Accuracy (mean +- std over 5 seeds) per aggregator x attack x share (INT8 only)."""
-    # Clean runs
-    clean_df = con.execute("""
+    clean_rows = con.execute("""
         SELECT
             aggregator,
             AVG(final_accuracy) AS mean_acc,
-            STDDEV(final_accuracy) AS std_acc
+            COALESCE(STDDEV(final_accuracy), 0.0) AS std_acc
         FROM runs
         WHERE attack = 'none' AND wire_precision = 'INT8' AND experiment_type = 'grid'
         GROUP BY aggregator
         ORDER BY aggregator;
-    """).fetchdf()
+    """).fetchall()
 
-    clean_map = {row["aggregator"]: f"{row['mean_acc']:.2f} +- {row['std_acc']:.2f}%" if row['std_acc'] is not None else f"{row['mean_acc']:.2f}%" for _, row in clean_df.iterrows()}
+    clean_map = {r[0]: f"{r[1]:.2f} +- {r[2]:.2f}%" for r in clean_rows}
 
-    # Attacked runs
-    att_df = con.execute("""
+    att_rows = con.execute("""
         SELECT
             attack,
-            ROUND(attacker_share * 100) AS share_pct,
+            CAST(ROUND(attacker_share * 100) AS INTEGER) AS share_pct,
             aggregator,
             AVG(final_accuracy) AS mean_acc,
-            STDDEV(final_accuracy) AS std_acc
+            COALESCE(STDDEV(final_accuracy), 0.0) AS std_acc
         FROM runs
         WHERE attack != 'none' AND wire_precision = 'INT8' AND experiment_type = 'grid'
         GROUP BY attack, share_pct, aggregator
         ORDER BY attack, share_pct, aggregator;
-    """).fetchdf()
+    """).fetchall()
 
-    # Markdown format
     md_lines = [
         "| Attack | Share | FedAvg | Multi-Krum | Coordinate Median | Trimmed Mean |",
         "| :--- | :--- | :--- | :--- | :--- | :--- |",
     ]
 
-    # Typst format
     typ_rows = [
         "  [*Attack Vector*], [*Share*], [*FedAvg*], [*Multi-Krum*], [*Coord Median*], [*Trimmed Mean*],",
     ]
@@ -223,22 +232,19 @@ def build_table_1_robustness(con: duckdb.DuckDBPyConnection) -> Tuple[str, str]:
     md_lines.append(f"| None (Clean) | 0% | {c_fed} | {c_mk} | {c_cm} | {c_tm} |")
     typ_rows.append(f"  [None (Clean)], [0%], [{c_fed}], [{c_mk}], [{c_cm}], [{c_tm}],")
 
-    attacks = sorted(list(set(att_df["attack"])))
-    shares = sorted(list(set(att_df["share_pct"])))
+    att_dict = defaultdict(dict)
+    for atk, sh, agg, m_acc, s_acc in att_rows:
+        att_dict[(atk, sh)][agg] = f"{m_acc:.2f} +- {s_acc:.2f}%"
 
-    for atk in attacks:
-        for sh in shares:
-            sub = att_df[(att_df["attack"] == atk) & (att_df["share_pct"] == sh)]
-            val_map = {}
-            for _, r in sub.iterrows():
-                std_str = f"{r['std_acc']:.2f}" if r['std_acc'] is not None else "0.00"
-                val_map[r["aggregator"]] = f"{r['mean_acc']:.2f} +- {std_str}%"
-            fed = val_map.get("FedAvg", "N/A")
-            mk = val_map.get("Multi-Krum", "N/A")
-            cm = val_map.get("Coordinate median", "N/A")
-            tm = val_map.get("Trimmed mean", "N/A")
-            md_lines.append(f"| {atk} | {int(sh)}% | {fed} | {mk} | {cm} | {tm} |")
-            typ_rows.append(f"  [{atk}], [{int(sh)}%], [{fed}], [{mk}], [{cm}], [{tm}],")
+    keys = sorted(list(att_dict.keys()), key=lambda x: (x[0], x[1]))
+    for atk, sh in keys:
+        val_map = att_dict[(atk, sh)]
+        fed = val_map.get("FedAvg", "N/A")
+        mk = val_map.get("Multi-Krum", "N/A")
+        cm = val_map.get("Coordinate median", "N/A")
+        tm = val_map.get("Trimmed mean", "N/A")
+        md_lines.append(f"| {atk} | {sh}% | {fed} | {mk} | {cm} | {tm} |")
+        typ_rows.append(f"  [{atk}], [{sh}%], [{fed}], [{mk}], [{cm}], [{tm}],")
 
     typst_table = (
         "#let table_1_robustness = table(\n"
@@ -254,18 +260,22 @@ def build_table_1_robustness(con: duckdb.DuckDBPyConnection) -> Tuple[str, str]:
 
 def build_table_2_precision_comparison(con: duckdb.DuckDBPyConnection) -> Tuple[str, str]:
     """Table 2: Float32 vs INT8 final accuracy and uplink bytes at 20% sign-flip."""
-    df = con.execute("""
+    rows = con.execute("""
         SELECT
             aggregator,
             wire_precision,
             AVG(final_accuracy) AS mean_acc,
-            STDDEV(final_accuracy) AS std_acc,
+            COALESCE(STDDEV(final_accuracy), 0.0) AS std_acc,
             AVG(bytes_per_client_round) / 1024.0 AS kb_per_client
         FROM runs
         WHERE attack = 'sign-flip' AND attacker_share = 0.20 AND experiment_type = 'grid'
         GROUP BY aggregator, wire_precision
         ORDER BY aggregator, wire_precision;
-    """).fetchdf()
+    """).fetchall()
+
+    res_dict = defaultdict(dict)
+    for agg, prec, m_acc, s_acc, kb in rows:
+        res_dict[agg][prec] = {"mean": m_acc, "std": s_acc, "kb": kb}
 
     aggregators = ["FedAvg", "Multi-Krum", "Coordinate median", "Trimmed mean"]
     md_lines = [
@@ -277,23 +287,18 @@ def build_table_2_precision_comparison(con: duckdb.DuckDBPyConnection) -> Tuple[
     ]
 
     for agg in aggregators:
-        sub_f32 = df[(df["aggregator"] == agg) & (df["wire_precision"] == "Float32")]
-        sub_int8 = df[(df["aggregator"] == agg) & (df["wire_precision"] == "INT8")]
-        if sub_f32.empty or sub_int8.empty:
+        f32 = res_dict[agg].get("Float32")
+        i8 = res_dict[agg].get("INT8")
+        if not f32 or not i8:
             continue
-        r_f32 = sub_f32.iloc[0]
-        r_int8 = sub_int8.iloc[0]
 
-        f32_std = f"{r_f32['std_acc']:.2f}" if r_f32['std_acc'] is not None else "0.00"
-        int8_std = f"{r_int8['std_acc']:.2f}" if r_int8['std_acc'] is not None else "0.00"
-        f32_str = f"{r_f32['mean_acc']:.2f} +- {f32_std}%"
-        int8_str = f"{r_int8['mean_acc']:.2f} +- {int8_std}%"
-
-        delta = r_int8["mean_acc"] - r_f32["mean_acc"]
+        f32_str = f"{f32['mean']:.2f} +- {f32['std']:.2f}%"
+        int8_str = f"{i8['mean']:.2f} +- {i8['std']:.2f}%"
+        delta = i8["mean"] - f32["mean"]
         delta_str = f"{delta:+.2f}%"
 
-        kb_f32 = r_f32["kb_per_client"]
-        kb_int8 = r_int8["kb_per_client"]
+        kb_f32 = f32["kb"]
+        kb_int8 = i8["kb"]
         cut_pct = (1.0 - (kb_int8 / kb_f32)) * 100.0
 
         md_lines.append(
@@ -317,30 +322,21 @@ def build_table_2_precision_comparison(con: duckdb.DuckDBPyConnection) -> Tuple[
 
 def build_table_5_wrong_f(con: duckdb.DuckDBPyConnection) -> Tuple[str, str]:
     """Table 5: Sensitivity to misconfigured f (Actual f=6 [30%], sign-flip, INT8, 5 seeds)."""
-    df = con.execute("""
+    rows = con.execute("""
         SELECT
             assumed_f,
             aggregator,
             AVG(final_accuracy) AS mean_acc,
-            STDDEV(final_accuracy) AS std_acc
+            COALESCE(STDDEV(final_accuracy), 0.0) AS std_acc
         FROM runs
         WHERE experiment_type = 'wrong_f'
         GROUP BY assumed_f, aggregator
         ORDER BY assumed_f, aggregator;
-    """).fetchdf()
+    """).fetchall()
 
-    if df.empty:
-        df = con.execute("""
-            SELECT
-                assumed_f,
-                aggregator,
-                AVG(final_accuracy) AS mean_acc,
-                STDDEV(final_accuracy) AS std_acc
-            FROM runs
-            WHERE actual_f = 6 AND attack = 'sign-flip' AND wire_precision = 'INT8'
-            GROUP BY assumed_f, aggregator
-            ORDER BY assumed_f, aggregator;
-        """).fetchdf()
+    val_map = defaultdict(dict)
+    for af, agg, m_acc, s_acc in rows:
+        val_map[af][agg] = f"{m_acc:.2f} +- {s_acc:.2f}%"
 
     md_lines = [
         "| Assumed f | Assumed Ratio (f/N) | Multi-Krum Final Acc | Trimmed Mean Final Acc | Vulnerability Analysis |",
@@ -350,7 +346,7 @@ def build_table_5_wrong_f(con: duckdb.DuckDBPyConnection) -> Tuple[str, str]:
         "  [*Assumed $f$*], [*Assumed Ratio*], [*Multi-Krum Acc*], [*Trimmed Mean Acc*], [*Vulnerability Profile*],",
     ]
 
-    assumed_list = sorted(list(set(df["assumed_f"]))) if not df.empty else [2, 4, 6, 8]
+    assumed_list = sorted(list(val_map.keys()))
     notes = {
         2: "Underestimates attackers: poisoned updates leak into aggregation",
         4: "Partial underestimation: vulnerable to coordinated shift",
@@ -359,13 +355,8 @@ def build_table_5_wrong_f(con: duckdb.DuckDBPyConnection) -> Tuple[str, str]:
     }
 
     for af in assumed_list:
-        sub = df[df["assumed_f"] == af]
-        val_map = {}
-        for _, r in sub.iterrows():
-            std_str = f"{r['std_acc']:.2f}" if r['std_acc'] is not None else "0.00"
-            val_map[r["aggregator"]] = f"{r['mean_acc']:.2f} +- {std_str}%"
-        mk_str = val_map.get("Multi-Krum", "N/A")
-        tm_str = val_map.get("Trimmed mean", "N/A")
+        mk_str = val_map[af].get("Multi-Krum", "N/A")
+        tm_str = val_map[af].get("Trimmed mean", "N/A")
         ratio_str = f"{af}/20 ({af/20.0*100:.0f}%)"
         note = notes.get(af, "")
         md_lines.append(f"| {af} | {ratio_str} | {mk_str} | {tm_str} | {note} |")
@@ -385,19 +376,19 @@ def build_table_5_wrong_f(con: duckdb.DuckDBPyConnection) -> Tuple[str, str]:
 
 def build_table_6_multikrum_dynamics(con: duckdb.DuckDBPyConnection) -> Tuple[str, str]:
     """Table 6: Multi-Krum attacker rejection and honest false-rejection rates."""
-    df = con.execute("""
+    rows = con.execute("""
         SELECT
             attack,
-            ROUND(attacker_share * 100) AS share_pct,
+            CAST(ROUND(attacker_share * 100) AS INTEGER) AS share_pct,
             AVG(attacker_rejection_rate) * 100.0 AS mean_att_rej,
-            STDDEV(attacker_rejection_rate) * 100.0 AS std_att_rej,
+            COALESCE(STDDEV(attacker_rejection_rate), 0.0) * 100.0 AS std_att_rej,
             AVG(honest_false_rejection_rate) * 100.0 AS mean_hon_rej,
-            STDDEV(honest_false_rejection_rate) * 100.0 AS std_hon_rej
+            COALESCE(STDDEV(honest_false_rejection_rate), 0.0) * 100.0 AS std_hon_rej
         FROM runs
         WHERE aggregator = 'Multi-Krum' AND attack != 'none' AND experiment_type = 'grid'
         GROUP BY attack, share_pct
         ORDER BY attack, share_pct;
-    """).fetchdf()
+    """).fetchall()
 
     md_lines = [
         "| Attack Vector | Attacker Share | Attacker Rejection Rate (%) | Honest False-Rejection Rate (%) |",
@@ -407,13 +398,11 @@ def build_table_6_multikrum_dynamics(con: duckdb.DuckDBPyConnection) -> Tuple[st
         "  [*Attack Vector*], [*Attacker Share*], [*Attacker Rejection Rate*], [*Honest False-Rejection Rate*],",
     ]
 
-    for _, r in df.iterrows():
-        att_std = f"{r['std_att_rej']:.2f}" if r['std_att_rej'] is not None else "0.00"
-        hon_std = f"{r['std_hon_rej']:.2f}" if r['std_hon_rej'] is not None else "0.00"
-        att_str = f"{r['mean_att_rej']:.2f} +- {att_std}%"
-        hon_str = f"{r['mean_hon_rej']:.2f} +- {hon_std}%"
-        md_lines.append(f"| {r['attack']} | {int(r['share_pct'])}% | {att_str} | {hon_str} |")
-        typ_rows.append(f"  [{r['attack']}], [{int(r['share_pct'])}%], [{att_str}], [{hon_str}],")
+    for atk, sh, m_att, s_att, m_hon, s_hon in rows:
+        att_str = f"{m_att:.2f} +- {s_att:.2f}%"
+        hon_str = f"{m_hon:.2f} +- {s_hon:.2f}%"
+        md_lines.append(f"| {atk} | {sh}% | {att_str} | {hon_str} |")
+        typ_rows.append(f"  [{atk}], [{sh}%], [{att_str}], [{hon_str}],")
 
     typst_table = (
         "#let table_4_multikrum = table(\n"
@@ -431,30 +420,24 @@ def extract_summary_metrics(con: duckdb.DuckDBPyConnection) -> Dict[str, Any]:
     """Queries key empirical numbers to populate text and CV line without manual hard-coding."""
     metrics = {}
 
-    # Total runs completed
     metrics["total_runs_completed"] = con.execute("SELECT count(*) FROM runs").fetchone()[0]
 
-    # Baseline clean FedAvg Float32 vs INT8
     clean_f32 = con.execute("SELECT AVG(final_accuracy) FROM runs WHERE aggregator='FedAvg' AND attack='none' AND wire_precision='Float32'").fetchone()[0]
     clean_int8 = con.execute("SELECT AVG(final_accuracy) FROM runs WHERE aggregator='FedAvg' AND attack='none' AND wire_precision='INT8'").fetchone()[0]
-    metrics["fedavg_clean_f32_acc"] = round(clean_f32, 2) if clean_f32 else None
-    metrics["fedavg_clean_int8_acc"] = round(clean_int8, 2) if clean_int8 else None
+    metrics["fedavg_clean_f32_acc"] = round(clean_f32, 2) if clean_f32 is not None else None
+    metrics["fedavg_clean_int8_acc"] = round(clean_int8, 2) if clean_int8 is not None else None
 
-    # Collapsed FedAvg under 30% sign-flip INT8
     fed_col = con.execute("SELECT AVG(final_accuracy) FROM runs WHERE aggregator='FedAvg' AND attack='sign-flip' AND attacker_share=0.30 AND wire_precision='INT8'").fetchone()[0]
-    metrics["fedavg_collapsed_30_signflip_acc"] = round(fed_col, 2) if fed_col else None
+    metrics["fedavg_collapsed_30_signflip_acc"] = round(fed_col, 2) if fed_col is not None else None
 
-    # Multi-Krum under 30% sign-flip INT8
-    mk_30 = con.execute("SELECT AVG(final_accuracy), STDDEV(final_accuracy) FROM runs WHERE aggregator='Multi-Krum' AND attack='sign-flip' AND attacker_share=0.30 AND wire_precision='INT8'").fetchone()
-    metrics["multikrum_30_signflip_acc_mean"] = round(mk_30[0], 2) if mk_30 and mk_30[0] else None
-    metrics["multikrum_30_signflip_acc_std"] = round(mk_30[1], 2) if mk_30 and mk_30[1] else None
+    mk_30 = con.execute("SELECT AVG(final_accuracy), COALESCE(STDDEV(final_accuracy), 0.0) FROM runs WHERE aggregator='Multi-Krum' AND attack='sign-flip' AND attacker_share=0.30 AND wire_precision='INT8'").fetchone()
+    metrics["multikrum_30_signflip_acc_mean"] = round(mk_30[0], 2) if mk_30 and mk_30[0] is not None else None
+    metrics["multikrum_30_signflip_acc_std"] = round(mk_30[1], 2) if mk_30 and mk_30[1] is not None else None
 
-    # Trimmed Mean under 30% sign-flip INT8
-    tm_30 = con.execute("SELECT AVG(final_accuracy), STDDEV(final_accuracy) FROM runs WHERE aggregator='Trimmed mean' AND attack='sign-flip' AND attacker_share=0.30 AND wire_precision='INT8'").fetchone()
-    metrics["trimmed_mean_30_signflip_acc_mean"] = round(tm_30[0], 2) if tm_30 and tm_30[0] else None
-    metrics["trimmed_mean_30_signflip_acc_std"] = round(tm_30[1], 2) if tm_30 and tm_30[1] else None
+    tm_30 = con.execute("SELECT AVG(final_accuracy), COALESCE(STDDEV(final_accuracy), 0.0) FROM runs WHERE aggregator='Trimmed mean' AND attack='sign-flip' AND attacker_share=0.30 AND wire_precision='INT8'").fetchone()
+    metrics["trimmed_mean_30_signflip_acc_mean"] = round(tm_30[0], 2) if tm_30 and tm_30[0] is not None else None
+    metrics["trimmed_mean_30_signflip_acc_std"] = round(tm_30[1], 2) if tm_30 and tm_30[1] is not None else None
 
-    # Uplink payload savings
     f32_bytes = con.execute("SELECT AVG(bytes_per_client_round) FROM runs WHERE wire_precision='Float32'").fetchone()[0]
     int8_bytes = con.execute("SELECT AVG(bytes_per_client_round) FROM runs WHERE wire_precision='INT8'").fetchone()[0]
     if f32_bytes and int8_bytes:
@@ -462,11 +445,10 @@ def extract_summary_metrics(con: duckdb.DuckDBPyConnection) -> Dict[str, Any]:
         metrics["int8_kb_per_client_round"] = round(int8_bytes / 1024.0, 1)
         metrics["bandwidth_savings_pct"] = round((1.0 - (int8_bytes / f32_bytes)) * 100.0, 1)
 
-    # Wrong-f experiment findings
     wf_2 = con.execute("SELECT AVG(final_accuracy) FROM runs WHERE experiment_type='wrong_f' AND aggregator='Multi-Krum' AND assumed_f=2").fetchone()[0]
     wf_6 = con.execute("SELECT AVG(final_accuracy) FROM runs WHERE experiment_type='wrong_f' AND aggregator='Multi-Krum' AND assumed_f=6").fetchone()[0]
-    metrics["wrong_f_mk_assumed_2"] = round(wf_2, 2) if wf_2 else None
-    metrics["wrong_f_mk_assumed_6"] = round(wf_6, 2) if wf_6 else None
+    metrics["wrong_f_mk_assumed_2"] = round(wf_2, 2) if wf_2 is not None else None
+    metrics["wrong_f_mk_assumed_6"] = round(wf_6, 2) if wf_6 is not None else None
 
     return metrics
 
@@ -522,16 +504,16 @@ def main():
         print(f"[!] Database {db_path} does not exist yet. Run experiments/run_grid.py first.")
         return
 
-    ensure_dirs(figures_dir, report_dir)
+    ensure_dirs(figures_dir, report_dir, report_dir / "figures")
     con = duckdb.connect(str(db_path), read_only=True)
 
     print("==================================================================")
     print("EdgeFed-Bench v2: Generating Analytical Report Assets")
     print("==================================================================")
 
-    # Generate Figures
-    generate_figure_1_convergence(con, figures_dir)
-    generate_figure_2_attacker_share(con, figures_dir)
+    # Generate Figures for results/figures and report/figures
+    generate_figure_1_convergence(con, [figures_dir, report_dir / "figures"])
+    generate_figure_2_attacker_share(con, [figures_dir, report_dir / "figures"])
 
     # Generate Tables
     table_1_md, table_1_typ = build_table_1_robustness(con)

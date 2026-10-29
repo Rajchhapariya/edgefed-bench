@@ -1,0 +1,15 @@
+{
+  "total_runs_completed": 320,
+  "fedavg_clean_f32_acc": 85.37,
+  "fedavg_clean_int8_acc": 85.3,
+  "fedavg_collapsed_30_signflip_acc": 10.0,
+  "multikrum_30_signflip_acc_mean": 77.36,
+  "multikrum_30_signflip_acc_std": 13.8,
+  "trimmed_mean_30_signflip_acc_mean": 67.11,
+  "trimmed_mean_30_signflip_acc_std": 25.41,
+  "f32_kb_per_client_round": 397.5,
+  "int8_kb_per_client_round": 99.4,
+  "bandwidth_savings_pct": 75.0,
+  "wrong_f_mk_assumed_2": 51.65,
+  "wrong_f_mk_assumed_6": 84.75
+}

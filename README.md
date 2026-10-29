@@ -19,22 +19,69 @@ While uniform gradient quantization reduces transmission volume, it introduces q
 
 ## 2. Key Findings
 
-- **75.0% Uplink Bandwidth Reduction:** Symmetric INT8 quantization compresses local update vectors from 397.5 KB to 99.4 KB per client round ($101{,}770$ INT8 weights $+ 4$ bytes float32 scale scalar), reducing total communication volume from 38.82 MB to 9.71 MB across 5 rounds.
-- **Outlier Rejection Invariance:** Multi-Krum achieves a **100% Byzantine mitigation rate** under both Float32 and INT8 quantization. Because INT8 quantization noise is strictly bounded ($\|e\|_\infty \le S / 2$), the maximum Euclidean perturbation across honest updates is negligible compared to the separation distance induced by adversarial attacks ($\|\mathbf{v}_{\text{honest}} - \mathbf{v}_{\text{byz}}\|_2 \gg S\sqrt{D}$).
-- **Convergence Parity:** Under 20% Byzantine attackers and non-IID Dirichlet distribution ($\alpha = 0.5$), Quantized Defended Multi-Krum converges to **74.60% test accuracy**, matching the unquantized Defended baseline (**74.39%**) while unmitigated FedAvg collapses to **19.43%**.
+- **75.0% Uplink Bandwidth Reduction:** Symmetric INT8 quantization compresses local update vectors from 397.5 KB to 99.4 KB per client round ($101{,}770$ INT8 weights $+ 4$ bytes float32 scale scalar), reducing total communication volume from 388.2 MB to 97.1 MB across 50 rounds.
+- **Outlier Rejection Invariance:** Multi-Krum achieves a **100.0% attacker rejection rate** under Gaussian attacks and **90.8% to 99.8%** under sign-flip attacks with both Float32 and INT8 quantization. Because INT8 quantization noise is strictly bounded ($\|e\|_\infty \le S / 2$), the maximum Euclidean perturbation across honest updates is negligible compared to the separation distance induced by adversarial attacks ($\|\mathbf{v}_{\text{honest}} - \mathbf{v}_{\text{byz}}\|_2 \gg S\sqrt{D}$).
+- **Convergence Parity:** Under 20% Byzantine attackers and non-IID Dirichlet label skew ($\alpha = 0.5$), Quantized Defended Multi-Krum converges to **84.90% $\pm$ 0.26% test accuracy**, matching the unquantized Float32 baseline (**84.89% $\pm$ 0.24%**), while unmitigated FedAvg collapses to **10.00%** under 30% sign-flip.
+- **Asymmetric Vulnerability to Assumed $f$:** Underestimating the attacker count ($f_\text{assumed} = 2$ when actual $f = 6$) causes Multi-Krum to drop to **51.65%** and Trimmed Mean to **17.61%**, whereas overestimating ($f_\text{assumed} = 8 > 6$) preserves **84.25%** and **80.08%** accuracy.
 
 ---
 
-## 3. Empirical Benchmark Matrix (5 Communication Rounds, 20 Clients, $\alpha = 0.5$)
+<!-- RESULTS:START -->
+## 3. Comprehensive Empirical Benchmark Matrix (50 Rounds, 20 Clients, $\alpha = 0.5$, 5 Seeds)
 
-| Regime                               | Aggregator | Wire Precision | Uplink / Client Round | Total Wire Bandwidth | Peak Accuracy | Final Accuracy | Byzantine Mitigation Rate |
-| :----------------------------------- | :--------- | :------------- | :-------------------- | :------------------- | :------------ | :------------- | :------------------------ |
-| **1. Baseline FedAvg**               | FedAvg     | Float32        | 397.5 KB              | 38.82 MB             | 76.22%        | 74.39%         | 100.0% (Clean)            |
-| **2. Poisoned FedAvg**               | FedAvg     | Float32        | 397.5 KB              | 38.82 MB             | 35.31%        | 19.43%         | **0.0% (Collapsed)**      |
-| **3. Defended Multi-Krum**           | Multi-Krum | Float32        | 397.5 KB              | 38.82 MB             | 75.92%        | 73.40%         | **100.0% (Mitigated)**    |
-| **4. Quantized Defended Multi-Krum** | Multi-Krum | INT8           | **99.4 KB (-75%)**    | **9.71 MB (-75%)**   | 74.60%        | **74.60%**     | **100.0% (Mitigated)**    |
+### 3.1. Full Factorial Robustness Comparison (INT8 Wire Precision)
+Values represent final test accuracy (mean $\pm$ std over seeds 0 to 4):
 
----
+| Attack | Share | FedAvg | Multi-Krum | Coordinate Median | Trimmed Mean |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| None (Clean) | 0% | 85.30 +- 0.31% | 85.35 +- 0.25% | 84.65 +- 0.44% | 85.36 +- 0.27% |
+| Gaussian | 10% | 48.79 +- 3.51% | 85.30 +- 0.39% | 84.54 +- 0.35% | 85.11 +- 0.40% |
+| Gaussian | 20% | 41.79 +- 6.24% | 85.17 +- 0.32% | 84.64 +- 0.34% | 84.89 +- 0.22% |
+| Gaussian | 30% | 42.81 +- 4.09% | 85.13 +- 0.29% | 84.73 +- 0.50% | 84.87 +- 0.39% |
+| sign-flip | 10% | 78.79 +- 3.58% | 85.28 +- 0.38% | 83.96 +- 0.63% | 84.11 +- 0.65% |
+| sign-flip | 20% | 41.60 +- 29.28% | 84.90 +- 0.26% | 82.97 +- 0.62% | 83.00 +- 0.45% |
+| sign-flip | 30% | 10.00 +- 0.00% | 84.75 +- 0.48% | 80.04 +- 0.30% | 80.37 +- 0.30% |
+
+### 3.2. Precision Trade-off: Float32 vs. INT8 Quantization (20% Sign-Flip Attack)
+Symmetric uniform INT8 quantization achieves ~75% uplink bandwidth reduction with zero statistically significant accuracy degradation across all robust aggregators:
+
+| Aggregator | Float32 Acc | INT8 Acc | Acc Delta | Float32 Uplink (KB) | INT8 Uplink (KB) | Bandwidth Cut |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| FedAvg | 40.51 +- 28.25% | 41.60 +- 29.28% | +1.09% | 397.5 KB | 99.4 KB | -75.0% |
+| Multi-Krum | 84.89 +- 0.24% | 84.90 +- 0.26% | +0.01% | 397.5 KB | 99.4 KB | -75.0% |
+| Coordinate median | 83.21 +- 0.62% | 82.97 +- 0.62% | -0.23% | 397.5 KB | 99.4 KB | -75.0% |
+| Trimmed mean | 82.92 +- 0.55% | 83.00 +- 0.45% | +0.08% | 397.5 KB | 99.4 KB | -75.0% |
+
+### 3.3. Learning Dynamics & Attacker Share Scaling
+
+<p align="center">
+  <img src="results/figures/fig1_convergence_20pct_signflip.png" alt="Convergence Trajectory" width="48%" />
+  <img src="results/figures/fig2_accuracy_vs_attacker_share.png" alt="Accuracy vs Attacker Share" width="48%" />
+</p>
+
+### 3.4. Server Vulnerability under Misconfigured Assumed $f$ (Actual $f=6$ [30% Attacked], Sign-Flip, INT8)
+When the central coordinator incorrectly estimates the Byzantine fraction, resilience degrades:
+
+| Assumed f | Assumed Ratio (f/N) | Multi-Krum Final Acc | Trimmed Mean Final Acc | Vulnerability Analysis |
+| :--- | :--- | :--- | :--- | :--- |
+| 2 | 2/20 (10%) | 51.65 +- 9.44% | 17.61 +- 5.09% | Underestimates attackers: poisoned updates leak into aggregation |
+| 4 | 4/20 (20%) | 81.41 +- 3.15% | 77.13 +- 3.03% | Partial underestimation: vulnerable to coordinated shift |
+| 6 | 6/20 (30%) | 84.75 +- 0.48% | 80.37 +- 0.30% | Exact configuration: optimal rejection envelope |
+| 8 | 8/20 (40%) | 84.25 +- 0.90% | 80.08 +- 0.26% | Overestimates attackers: trims honest samples without collapsing |
+
+### 3.5. Multi-Krum Rejection Dynamics
+Isolation and false-exclusion rates across communication rounds:
+
+| Attack Vector | Attacker Share | Attacker Rejection Rate (%) | Honest False-Rejection Rate (%) |
+| :--- | :--- | :--- | :--- |
+| Gaussian | 10% | 100.00 +- 0.00% | 0.00 +- 0.00% |
+| Gaussian | 20% | 100.00 +- 0.00% | 0.00 +- 0.00% |
+| Gaussian | 30% | 100.00 +- 0.00% | 0.00 +- 0.00% |
+| sign-flip | 10% | 99.80 +- 0.42% | 0.02 +- 0.05% |
+| sign-flip | 20% | 90.80 +- 11.66% | 2.30 +- 2.92% |
+| sign-flip | 30% | 95.50 +- 4.74% | 1.93 +- 2.03% |
+
+<!-- RESULTS:END -->
 
 ## 4. Systems & Data Engineering Architecture
 
