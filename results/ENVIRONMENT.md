@@ -36,3 +36,4 @@ A single-run benchmark profile consisting of 50 communication rounds across 20 e
 - **Total Configurations in Benchmark Grid:** 280 runs (40 clean runs + 240 attacked runs across 5 seeds)
 - **Projected Total Grid Wall-Clock Time:** 13,619.2 seconds (approximately 3.78 hours)
 - **Decision on Round Count:** Because the projected duration of 3.78 hours is substantially below the 24-hour threshold, the full protocol of **50 rounds** is retained without reduction.
+

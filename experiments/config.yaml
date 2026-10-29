@@ -54,3 +54,4 @@ wrong_f_experiment:
   batch_size: 128
   lr: 0.05
   momentum: 0.9
+
