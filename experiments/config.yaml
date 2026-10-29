@@ -1,0 +1,56 @@
+# EdgeFed-Bench v2: Experiment Grid Configuration
+
+grid:
+  aggregators:
+    - FedAvg
+    - Multi-Krum
+    - Coordinate median
+    - Trimmed mean
+  attacks:
+    - none
+    - sign-flip
+    - Gaussian
+  attacker_shares:
+    - 0.10
+    - 0.20
+    - 0.30
+  precisions:
+    - Float32
+    - INT8
+  seeds:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+  num_rounds: 50
+  num_clients: 20
+  dirichlet_alpha: 0.5
+  batch_size: 128
+  lr: 0.05
+  momentum: 0.9
+
+wrong_f_experiment:
+  aggregators:
+    - Multi-Krum
+    - Trimmed mean
+  attack: sign-flip
+  actual_f: 6
+  assumed_f_values:
+    - 2
+    - 4
+    - 6
+    - 8
+  precision: INT8
+  seeds:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+  num_rounds: 50
+  num_clients: 20
+  dirichlet_alpha: 0.5
+  batch_size: 128
+  lr: 0.05
+  momentum: 0.9

@@ -8,6 +8,8 @@ data/cache/
 
 # Generated Parquet shards and local DuckDB databases
 data/clients/
+data/clients*/
+data/clients_*
 data/*.parquet
 data/*.duckdb
 *.duckdb
