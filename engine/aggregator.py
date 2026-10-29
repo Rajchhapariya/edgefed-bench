@@ -67,6 +67,61 @@ class RobustAggregator:
         return median_vec.astype(np.float32)
 
     @staticmethod
+    def trimmed_mean(
+        updates: List[np.ndarray],
+        num_byzantine: Optional[int] = None,
+        beta: Optional[float] = None,
+    ) -> np.ndarray:
+        """Coordinate-wise Trimmed Mean Aggregator.
+
+        Mathematical Formulation:
+            For each coordinate j in {1, ..., D}:
+            1. Sort the N values: [v_{(1)}]_j <= [v_{(2)}]_j <= ... <= [v_{(N)}]_j
+            2. Drop the k smallest and k largest values, where k = ceil(beta * N).
+               Default beta = f / N, where f is the assumed number of Byzantine attackers.
+            3. Average the remaining N - 2k values:
+               [v_trim]_j = (1 / (N - 2k)) * sum_{i=k+1}^{N-k} [v_{(i)}]_j
+
+        Args:
+            updates: List of client update vectors of shape (D,).
+            num_byzantine: Assumed number of Byzantine attackers (f).
+            beta: Trimming fraction. If None, defaults to f / N.
+
+        Returns:
+            Aggregated update vector computed component-by-component.
+
+        Raises:
+            ValueError: If updates is empty, neither num_byzantine nor beta is provided,
+                        or if 2k >= N.
+        """
+        if not updates:
+            raise ValueError("Cannot aggregate empty list of updates.")
+
+        num_clients = len(updates)
+        if beta is None:
+            if num_byzantine is None:
+                raise ValueError("Either num_byzantine or beta must be specified for trimmed_mean.")
+            beta = float(num_byzantine) / float(num_clients)
+
+        k = int(np.ceil(beta * num_clients))
+
+        if 2 * k >= num_clients:
+            raise ValueError(
+                f"Trimmed mean requires 2*k < N to retain at least one candidate update, "
+                f"but got 2*{k} = {2 * k} >= {num_clients}."
+            )
+
+        stacked = np.stack(updates, axis=0)
+        sorted_stacked = np.sort(stacked, axis=0)
+
+        if k == 0:
+            trimmed = sorted_stacked
+        else:
+            trimmed = sorted_stacked[k : num_clients - k, :]
+
+        return np.mean(trimmed, axis=0).astype(np.float32)
+
+    @staticmethod
     def multi_krum(
         updates: List[np.ndarray],
         num_byzantine: int,

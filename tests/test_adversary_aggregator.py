@@ -130,6 +130,50 @@ class TestAdversaryAndAggregator(unittest.TestCase):
         # Final aggregated vector remains aligned with honest direction
         self.assertGreater(float(np.mean(agg_vec)), 0.04)
 
+    def test_06_trimmed_mean_hand_computed(self):
+        """Verify coordinate-wise trimmed mean against a hand-computed 5-client example."""
+        # 5 clients, 2 coordinates
+        updates = [
+            np.array([1.0, 10.0], dtype=np.float32),
+            np.array([2.0, 20.0], dtype=np.float32),
+            np.array([3.0, 30.0], dtype=np.float32),
+            np.array([4.0, 40.0], dtype=np.float32),
+            np.array([5.0, 50.0], dtype=np.float32),
+        ]
+        # N = 5, f = 1 -> beta = 1/5 = 0.2, k = ceil(0.2 * 5) = 1
+        # Dropping min and max leaves indices 1, 2, 3: [2.0, 3.0, 4.0] (mean = 3.0) and [20.0, 30.0, 40.0] (mean = 30.0)
+        res = RobustAggregator.trimmed_mean(updates, num_byzantine=1)
+        expected = np.array([3.0, 30.0], dtype=np.float32)
+        np.testing.assert_allclose(res, expected, rtol=1e-5)
+
+    def test_07_trimmed_mean_k_zero_equals_fedavg(self):
+        """Verify trimmed mean with k=0 is numerically identical to plain FedAvg."""
+        res_trimmed = RobustAggregator.trimmed_mean(self.honest_updates, beta=0.0)
+        res_fedavg = RobustAggregator.fed_avg(self.honest_updates)
+        np.testing.assert_allclose(res_trimmed, res_fedavg, rtol=1e-5)
+
+    def test_08_trimmed_mean_ignores_extreme_outlier(self):
+        """Verify trimmed mean ignores a single massive adversarial outlier coordinate."""
+        updates = [
+            np.array([1.0, 2.0], dtype=np.float32),
+            np.array([1.0, 2.0], dtype=np.float32),
+            np.array([1.0, 2.0], dtype=np.float32),
+            np.array([1.0, 2.0], dtype=np.float32),
+            np.array([10000.0, -5000.0], dtype=np.float32),  # Malicious outlier
+        ]
+        # With f = 1, k = 1: the outlier is trimmed out on both coordinates
+        res = RobustAggregator.trimmed_mean(updates, num_byzantine=1)
+        expected = np.array([1.0, 2.0], dtype=np.float32)
+        np.testing.assert_allclose(res, expected, rtol=1e-5)
+
+    def test_09_trimmed_mean_rejects_invalid_k(self):
+        """Verify trimmed mean raises ValueError when 2k >= N."""
+        updates = [np.array([1.0], dtype=np.float32) for _ in range(4)]
+        # For N = 4, f = 2 -> beta = 0.5 -> k = ceil(0.5 * 4) = 2 -> 2*k = 4 >= 4
+        with self.assertRaises(ValueError) as ctx:
+            RobustAggregator.trimmed_mean(updates, num_byzantine=2)
+        self.assertIn("2*k < N", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
