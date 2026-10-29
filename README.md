@@ -17,16 +17,15 @@ While uniform gradient quantization reduces transmission volume, it introduces q
 
 ---
 
-## 2. Key Findings
-
-- **75.0% Uplink Bandwidth Reduction:** Symmetric INT8 quantization compresses local update vectors from 397.5 KB to 99.4 KB per client round ($101{,}770$ INT8 weights $+ 4$ bytes float32 scale scalar), reducing total communication volume from 388.2 MB to 97.1 MB across 50 rounds.
-- **Outlier Rejection Invariance:** Multi-Krum achieves a **100.0% attacker rejection rate** under Gaussian attacks and **90.8% to 99.8%** under sign-flip attacks with both Float32 and INT8 quantization. Rejection rates are identical to two decimals at both precisions. A likely reason is that per-element INT8 error is bounded by S/2, which is small next to the distance between honest and attacker updates; this run measured the outcome, not that distance, so treat the explanation as a hypothesis.
-- **Convergence Parity:** Under 20% Byzantine attackers and non-IID Dirichlet label skew ($\alpha = 0.5$), Quantized Defended Multi-Krum converges to **84.90% $\pm$ 0.26% test accuracy**, matching the unquantized Float32 baseline (**84.89% $\pm$ 0.24%**), while unmitigated FedAvg collapses to **10.00%** under 30% sign-flip.
-- **Asymmetric Vulnerability to Assumed $f$:** Underestimating the attacker count ($f_\text{assumed} = 2$ when actual $f = 6$) causes Multi-Krum to drop to **51.65%** and Trimmed Mean to **17.61%**, whereas overestimating ($f_\text{assumed} = 8 > 6$) preserves **84.25%** and **80.08%** accuracy.
-
----
-
 <!-- RESULTS:START -->
+## 2. Key Findings (generated from the database)
+
+- **Uplink bandwidth:** INT8 cuts the update from 397.5 KB to 99.4 KB per client per round, a 75.0% reduction (388.2 MB to 97.1 MB per 50-round run with 20 clients).
+- **Attacker rejection (Multi-Krum, INT8 and Float32 pooled, mean over seeds for sign-flip):** 100.0% in the worst Gaussian run; between 90.8% and 99.8% under sign-flip, depending on attacker share.
+- **Quantization versus accuracy:** at 20% sign-flip, Multi-Krum reaches 84.90 +- 0.26% with INT8 and 84.89 +- 0.24% with Float32. FedAvg reaches 10.00% at 30% sign-flip.
+- **Defences at 30% sign-flip (INT8):** Multi-Krum 84.75 +- 0.48%, Trimmed Mean 80.37 +- 0.30%, Coordinate Median 80.04 +- 0.30%.
+- **Wrong assumed f (actual f = 6):** Multi-Krum 51.65% at assumed f = 2 and 84.25% at assumed f = 8; Trimmed Mean 17.61% and 80.08%.
+
 ## 3. Comprehensive Empirical Benchmark Matrix (50 Rounds, 20 Clients, $\alpha = 0.5$, 5 Seeds)
 
 ### 3.1. Full Factorial Robustness Comparison (INT8 Wire Precision)
@@ -43,7 +42,7 @@ Values represent final test accuracy (mean $\pm$ std over seeds 0 to 4):
 | sign-flip | 30% | 10.00 +- 0.00% | 84.75 +- 0.48% | 80.04 +- 0.30% | 80.37 +- 0.30% |
 
 ### 3.2. Precision Trade-off: Float32 vs. INT8 Quantization (20% Sign-Flip Attack)
-Symmetric uniform INT8 quantization achieves ~75% uplink bandwidth reduction with zero statistically significant accuracy degradation across all robust aggregators:
+Symmetric uniform INT8 quantization cuts uplink by 75.0%. The Float32 to INT8 accuracy difference is smaller than one standard deviation for every aggregator in this table:
 
 | Aggregator | Float32 Acc | INT8 Acc | Acc Delta | Float32 Uplink (KB) | INT8 Uplink (KB) | Bandwidth Cut |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |

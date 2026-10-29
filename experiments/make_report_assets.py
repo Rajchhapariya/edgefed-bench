@@ -457,6 +457,84 @@ def extract_summary_metrics(con: duckdb.DuckDBPyConnection) -> Dict[str, Any]:
     return metrics
 
 
+def extract_prose_metrics(con: duckdb.DuckDBPyConnection) -> Dict[str, str]:
+    """Every number quoted in report prose and the README key findings, formatted from the database."""
+    def one(sql):
+        return con.execute(sql).fetchone()
+
+    def ms(agg, attack, share, prec="INT8", exp="grid"):
+        r = one(f"SELECT AVG(final_accuracy), COALESCE(STDDEV_SAMP(final_accuracy), 0) FROM runs "
+                f"WHERE experiment_type='{exp}' AND aggregator='{agg}' AND attack='{attack}' "
+                f"AND attacker_share={share} AND wire_precision='{prec}'")
+        return r[0], r[1]
+
+    def wf(agg, f):
+        return one(f"SELECT AVG(final_accuracy), COALESCE(STDDEV_SAMP(final_accuracy), 0) FROM runs "
+                   f"WHERE experiment_type='wrong_f' AND aggregator='{agg}' AND assumed_f={f}")
+
+    out: Dict[str, str] = {}
+    out["grid_runs"] = str(one("SELECT COUNT(*) FROM runs WHERE experiment_type='grid'")[0])
+    out["wrong_f_runs"] = str(one("SELECT COUNT(*) FROM runs WHERE experiment_type='wrong_f'")[0])
+    out["total_runs"] = str(int(out["grid_runs"]) + int(out["wrong_f_runs"]))
+    out["attacked_runs"] = str(one("SELECT COUNT(*) FROM runs WHERE experiment_type='grid' AND attack<>'none'")[0])
+    b32 = one("SELECT AVG(bytes_per_client_round) FROM runs WHERE experiment_type='grid' AND wire_precision='Float32'")[0]
+    b8 = one("SELECT AVG(bytes_per_client_round) FROM runs WHERE experiment_type='grid' AND wire_precision='INT8'")[0]
+    out["f32_bytes"] = f"{b32:,.0f}"
+    out["int8_bytes"] = f"{b8:,.0f}"
+    out["f32_kb"] = f"{b32 / 1024:.1f}"
+    out["int8_kb"] = f"{b8 / 1024:.1f}"
+    out["savings"] = f"{(1 - b8 / b32) * 100:.1f}"
+    t32 = one("SELECT AVG(total_uplink_bytes) FROM runs WHERE experiment_type='grid' AND wire_precision='Float32'")[0]
+    t8 = one("SELECT AVG(total_uplink_bytes) FROM runs WHERE experiment_type='grid' AND wire_precision='INT8'")[0]
+    out["total_mb_f32"] = f"{t32 / 2**20:.1f}"
+    out["total_mb_int8"] = f"{t8 / 2**20:.1f}"
+    for key, (agg, atk, sh) in {
+        "mk20": ("Multi-Krum", "sign-flip", 0.2), "mk30": ("Multi-Krum", "sign-flip", 0.3),
+        "tm20": ("Trimmed mean", "sign-flip", 0.2), "tm30": ("Trimmed mean", "sign-flip", 0.3),
+        "cm30": ("Coordinate median", "sign-flip", 0.3), "fa30": ("FedAvg", "sign-flip", 0.3),
+        "fa20": ("FedAvg", "sign-flip", 0.2),
+    }.items():
+        m, sd = ms(agg, atk, sh)
+        out[key] = f"{m:.2f}"
+        out[key + "_sd"] = f"{sd:.2f}"
+    m32, sd32 = ms("Multi-Krum", "sign-flip", 0.2, prec="Float32")
+    out["mk20_f32"] = f"{m32:.2f}"
+    out["mk20_f32_sd"] = f"{sd32:.2f}"
+    for agg, tag in (("Multi-Krum", "mk"), ("Trimmed mean", "tm")):
+        for f in (2, 4, 6, 8):
+            m, sd = wf(agg, f)
+            out[f"{tag}_wf{f}"] = f"{m:.2f}"
+            out[f"{tag}_wf{f}_sd"] = f"{sd:.2f}"
+    g = one("SELECT MIN(attacker_rejection_rate), MAX(attacker_rejection_rate) FROM runs WHERE experiment_type='grid' AND aggregator='Multi-Krum' AND attack='Gaussian'")
+    s = one("SELECT MIN(attacker_rejection_rate), MAX(attacker_rejection_rate) FROM runs WHERE experiment_type='grid' AND aggregator='Multi-Krum' AND attack='sign-flip'")
+    out["rej_gauss_min"] = f"{g[0] * 100:.1f}"
+    out["rej_sf_min_run"] = f"{s[0] * 100:.1f}"
+    sf = con.execute("SELECT attacker_share, AVG(attacker_rejection_rate) FROM runs WHERE experiment_type='grid' AND aggregator='Multi-Krum' AND attack='sign-flip' GROUP BY 1").fetchall()
+    out["rej_sf_min"] = f"{min(v for _, v in sf) * 100:.1f}"
+    out["rej_sf_max"] = f"{max(v for _, v in sf) * 100:.1f}"
+    return out
+
+
+def write_prose_typ(path: Path, m: Dict[str, str]) -> None:
+    lines = ["// Auto-generated from results/results.duckdb. Do not edit.", "#let m = ("]
+    for k, v in m.items():
+        lines.append(f'  {k.replace("-", "_")}: "{v}",')
+    lines.append(")")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def key_findings_md(m: Dict[str, str]) -> str:
+    return f"""## 2. Key Findings (generated from the database)
+
+- **Uplink bandwidth:** INT8 cuts the update from {m["f32_kb"]} KB to {m["int8_kb"]} KB per client per round, a {m["savings"]}% reduction ({m["total_mb_f32"]} MB to {m["total_mb_int8"]} MB per 50-round run with 20 clients).
+- **Attacker rejection (Multi-Krum, INT8 and Float32 pooled, mean over seeds for sign-flip):** {m["rej_gauss_min"]}% in the worst Gaussian run; between {m["rej_sf_min"]}% and {m["rej_sf_max"]}% under sign-flip, depending on attacker share.
+- **Quantization versus accuracy:** at 20% sign-flip, Multi-Krum reaches {m["mk20"]} +- {m["mk20_sd"]}% with INT8 and {m["mk20_f32"]} +- {m["mk20_f32_sd"]}% with Float32. FedAvg reaches {m["fa30"]}% at 30% sign-flip.
+- **Defences at 30% sign-flip (INT8):** Multi-Krum {m["mk30"]} +- {m["mk30_sd"]}%, Trimmed Mean {m["tm30"]} +- {m["tm30_sd"]}%, Coordinate Median {m["cm30"]} +- {m["cm30_sd"]}%.
+- **Wrong assumed f (actual f = 6):** Multi-Krum {m["mk_wf2"]}% at assumed f = 2 and {m["mk_wf8"]}% at assumed f = 8; Trimmed Mean {m["tm_wf2"]}% and {m["tm_wf8"]}%.
+
+"""
+
+
 def update_readme_results(readme_path: Path, new_results_md: str):
     """Replaces section in README.md strictly between <!-- RESULTS:START --> and <!-- RESULTS:END -->."""
     with open(readme_path, "r", encoding="utf-8") as f:
@@ -543,8 +621,12 @@ def main():
         json.dump(metrics, f, indent=2)
     print(f"[+] Saved summary metrics to: {metrics_path}")
 
+    prose = extract_prose_metrics(con)
+    write_prose_typ(report_dir / "metrics.typ", prose)
+    print(f"[+] Saved report prose metrics to: {report_dir / 'metrics.typ'}")
+
     # Assemble Markdown Results Section
-    results_md = f"""## 3. Comprehensive Empirical Benchmark Matrix (50 Rounds, 20 Clients, $\\alpha = 0.5$, 5 Seeds)
+    results_md = key_findings_md(prose) + f"""## 3. Comprehensive Empirical Benchmark Matrix (50 Rounds, 20 Clients, $\\alpha = 0.5$, 5 Seeds)
 
 ### 3.1. Full Factorial Robustness Comparison (INT8 Wire Precision)
 Values represent final test accuracy (mean $\\pm$ std over seeds 0 to 4):
@@ -552,7 +634,7 @@ Values represent final test accuracy (mean $\\pm$ std over seeds 0 to 4):
 {table_1_md}
 
 ### 3.2. Precision Trade-off: Float32 vs. INT8 Quantization (20% Sign-Flip Attack)
-Symmetric uniform INT8 quantization achieves ~75% uplink bandwidth reduction with zero statistically significant accuracy degradation across all robust aggregators:
+Symmetric uniform INT8 quantization cuts uplink by {prose["savings"]}%. The Float32 to INT8 accuracy difference is smaller than one standard deviation for every aggregator in this table:
 
 {table_2_md}
 

@@ -3,6 +3,7 @@
 // Robustness Study Across Seeds, Attacks, and Defences
 // ==============================================================================
 
+#import "metrics.typ": m
 #import "tables.typ": table_1_robustness, table_2_precision, table_3_wrong_f, table_4_multikrum
 
 #set page(
@@ -110,10 +111,10 @@
 #grid(
   columns: (1fr, 1fr, 1fr, 1fr),
   gutter: 7pt,
-  stat-card("Grid Scope", "320 Runs", "280 grid + 40 wrong-f across 5 seeds", color: rgb("#0284c7")),
-  stat-card("Uplink Savings", "-75.0%", "397.5 KB to 99.4 KB / client / round", color: rgb("#10b981")),
-  stat-card("Tolerance Bound", "30% Byz", "Multi-Krum & Trimmed Mean survive", color: rgb("#8b5cf6")),
-  stat-card("Vulnerability", "Assumed f", "Underestimating f drops acc to ~24%", color: rgb("#ef4444"))
+  stat-card("Grid Scope", m.total_runs + " Runs", m.grid_runs + " grid + " + m.wrong_f_runs + " wrong-f across 5 seeds", color: rgb("#0284c7")),
+  stat-card("Uplink Savings", "-" + m.savings + "%", m.f32_kb + " KB to " + m.int8_kb + " KB / client / round", color: rgb("#10b981")),
+  stat-card("Multi-Krum at 30%", m.mk30 + "%", "final accuracy, sign-flip, INT8", color: rgb("#8b5cf6")),
+  stat-card("Assumed f = 2", m.mk_wf2 + "%", "Multi-Krum accuracy, actual f = 6", color: rgb("#ef4444"))
 )
 
 #v(0.1cm)
@@ -143,7 +144,7 @@ $ Delta bold(w)_i^(t) = bold(w)_(i, "local")^(t) - bold(w)_("global")^(t) $
 === 2.3. Uniform Symmetric INT8 Quantization
 Under INT8 wire precision, each client compresses its continuous update vector $bold(x) in RR^D$ into signed 8-bit integers using symmetric scaling:
 $ alpha = max_j |x_j|, quad S = alpha / 127, quad q_j = "clip"("round"(x_j / S), -127, 127) in ZZ_"int8" $
-Reconstruction on the server yields $hat(x)_j = q_j dot S$. The element-wise quantization error is bounded by $|x_j - hat(x)_j| <= S / 2 = alpha / 254$. Payload transmission drops from 407,084 bytes ($101,770 times 4$ bytes float32 $+ 4$ bytes header) to 101,778 bytes ($101,770 times 1$ byte int8 $+ 4$ bytes float32 scale $+ 4$ bytes header), achieving an exact 75.0% uplink bandwidth reduction.
+Reconstruction on the server yields $hat(x)_j = q_j dot S$. The element-wise quantization error is bounded by $|x_j - hat(x)_j| <= S / 2 = alpha / 254$. Payload per client per round drops from #m.f32_bytes bytes ($101,770 times 4$ bytes float32) to #m.int8_bytes bytes ($101,770 times 1$ byte int8 $+ 4$ bytes float32 scale), a #m.savings% uplink reduction.
 
 #pagebreak()
 
@@ -159,7 +160,7 @@ The benchmark evaluates two primary attack vectors deployed by a designated frac
 - *Coordinate-wise Trimmed Mean:* For each coordinate $j$, sorts candidate values, excludes the $k = ceil(beta N)$ largest and $k$ smallest values (where $beta = f / N$), and averages the remaining $N - 2k$ coordinates. Requires $2k < N$.
 
 === 2.6. Full Factorial Experiment Grid
-The experimental grid sweeps 280 configurations: 4 Aggregators $times$ 2 Attacks (sign-flip, Gaussian) $times$ 3 Attacker Shares (10%, 20%, 30%) $times$ 2 Wire Precisions (Float32, INT8) $times$ 5 Seeds (0, 1, 2, 3, 4) across 50 rounds, plus 40 clean baseline runs (0% attackers). A single seed controls Dirichlet partitioning, model weight initialization, Byzantine node selection, Gaussian attack noise, and client-level batch shuffling, guaranteeing exact bit-level determinism on CPU.
+The experimental grid sweeps #m.grid_runs configurations: 4 Aggregators $times$ 2 Attacks (sign-flip, Gaussian) $times$ 3 Attacker Shares (10%, 20%, 30%) $times$ 2 Wire Precisions (Float32, INT8) $times$ 5 Seeds (0, 1, 2, 3, 4) across 50 rounds, plus 40 clean baseline runs (0% attackers). A single seed controls Dirichlet partitioning, model weight initialization, Byzantine node selection, Gaussian attack noise, and client-level batch shuffling, guaranteeing exact bit-level determinism on CPU.
 
 #v(0.15cm)
 
@@ -171,7 +172,7 @@ The experimental grid sweeps 280 configurations: 4 Aggregators $times$ 2 Attacks
 
 #callout(
   "Core Result: Quantization Noise Invariance under Severe Non-IID Skew",
-  "Across all 240 attacked configurations, INT8 quantization does not compromise Byzantine defense guarantees. Multi-Krum and Trimmed Mean retain ~84% accuracy under 20% sign-flip and Gaussian attacks. Because INT8 quantization error is bounded by S/2, the maximum Euclidean displacement across 101,770 coordinates is orders of magnitude smaller than the inter-cluster distance separating honest updates from adversarial sign-flipped vectors.",
+  "Across the " + m.attacked_runs + " attacked configurations, switching from Float32 to INT8 changed Multi-Krum final accuracy at 20% sign-flip from " + m.mk20_f32 + "% to " + m.mk20 + "%, a difference smaller than one standard deviation (" + m.mk20_sd + "). Trimmed Mean reaches " + m.tm20 + "% in the same setting. Per-element INT8 error is bounded by S/2; a likely reason the defences are unaffected is that this error is small next to the distance between honest and attacker updates, but that distance was not measured here, so this is a hypothesis.",
   kind: "tip"
 )
 
@@ -216,7 +217,7 @@ Production federated learning servers do not possess oracle knowledge of the tru
 
 #callout(
   "Critical Architectural Vulnerability: Asymmetric Risk of Misconfigured f",
-  "Underestimating f is catastrophic: setting assumed f=2 when actual f=6 causes Multi-Krum accuracy to collapse to ~24% because adversarial vectors leak into the selected candidate pool. Conversely, overestimating f (assumed f=8 > 6) preserves ~82% accuracy, merely discarding two additional honest updates. Recommendation for production FL architects: configure assumed f conservatively higher than expected baseline risk.",
+  "Underestimating f hurts most: with assumed f = 2 and actual f = 6, Multi-Krum falls to " + m.mk_wf2 + "% and Trimmed Mean to " + m.tm_wf2 + "%, because attacker vectors reach the aggregate. Overestimating (assumed f = 8) keeps Multi-Krum at " + m.mk_wf8 + "% and Trimmed Mean at " + m.tm_wf8 + "%, at the cost of discarding extra honest updates. Setting assumed f at or above the expected attacker count is the safer choice in this setup.",
   kind: "warning"
 )
 
