@@ -417,29 +417,33 @@ def build_table_6_multikrum_dynamics(con: duckdb.DuckDBPyConnection) -> Tuple[st
 
 
 def extract_summary_metrics(con: duckdb.DuckDBPyConnection) -> Dict[str, Any]:
-    """Queries key empirical numbers to populate text and CV line without manual hard-coding."""
+    """Queries key empirical numbers to populate text and CV line without manual hard-coding.
+
+    Every query is restricted to the main grid. The wrong-f runs share the same table and the
+    same aggregator, attack and share values, so an unfiltered mean silently mixes them in.
+    """
     metrics = {}
 
-    metrics["total_runs_completed"] = con.execute("SELECT count(*) FROM runs").fetchone()[0]
+    metrics["total_runs_completed"] = con.execute("SELECT count(*) FROM runs WHERE experiment_type='grid'").fetchone()[0]
 
-    clean_f32 = con.execute("SELECT AVG(final_accuracy) FROM runs WHERE aggregator='FedAvg' AND attack='none' AND wire_precision='Float32'").fetchone()[0]
-    clean_int8 = con.execute("SELECT AVG(final_accuracy) FROM runs WHERE aggregator='FedAvg' AND attack='none' AND wire_precision='INT8'").fetchone()[0]
+    clean_f32 = con.execute("SELECT AVG(final_accuracy) FROM runs WHERE experiment_type='grid' AND aggregator='FedAvg' AND attack='none' AND wire_precision='Float32'").fetchone()[0]
+    clean_int8 = con.execute("SELECT AVG(final_accuracy) FROM runs WHERE experiment_type='grid' AND aggregator='FedAvg' AND attack='none' AND wire_precision='INT8'").fetchone()[0]
     metrics["fedavg_clean_f32_acc"] = round(clean_f32, 2) if clean_f32 is not None else None
     metrics["fedavg_clean_int8_acc"] = round(clean_int8, 2) if clean_int8 is not None else None
 
-    fed_col = con.execute("SELECT AVG(final_accuracy) FROM runs WHERE aggregator='FedAvg' AND attack='sign-flip' AND attacker_share=0.30 AND wire_precision='INT8'").fetchone()[0]
+    fed_col = con.execute("SELECT AVG(final_accuracy) FROM runs WHERE experiment_type='grid' AND aggregator='FedAvg' AND attack='sign-flip' AND attacker_share=0.30 AND wire_precision='INT8'").fetchone()[0]
     metrics["fedavg_collapsed_30_signflip_acc"] = round(fed_col, 2) if fed_col is not None else None
 
-    mk_30 = con.execute("SELECT AVG(final_accuracy), COALESCE(STDDEV(final_accuracy), 0.0) FROM runs WHERE aggregator='Multi-Krum' AND attack='sign-flip' AND attacker_share=0.30 AND wire_precision='INT8'").fetchone()
+    mk_30 = con.execute("SELECT AVG(final_accuracy), COALESCE(STDDEV(final_accuracy), 0.0) FROM runs WHERE experiment_type='grid' AND aggregator='Multi-Krum' AND attack='sign-flip' AND attacker_share=0.30 AND wire_precision='INT8'").fetchone()
     metrics["multikrum_30_signflip_acc_mean"] = round(mk_30[0], 2) if mk_30 and mk_30[0] is not None else None
     metrics["multikrum_30_signflip_acc_std"] = round(mk_30[1], 2) if mk_30 and mk_30[1] is not None else None
 
-    tm_30 = con.execute("SELECT AVG(final_accuracy), COALESCE(STDDEV(final_accuracy), 0.0) FROM runs WHERE aggregator='Trimmed mean' AND attack='sign-flip' AND attacker_share=0.30 AND wire_precision='INT8'").fetchone()
+    tm_30 = con.execute("SELECT AVG(final_accuracy), COALESCE(STDDEV(final_accuracy), 0.0) FROM runs WHERE experiment_type='grid' AND aggregator='Trimmed mean' AND attack='sign-flip' AND attacker_share=0.30 AND wire_precision='INT8'").fetchone()
     metrics["trimmed_mean_30_signflip_acc_mean"] = round(tm_30[0], 2) if tm_30 and tm_30[0] is not None else None
     metrics["trimmed_mean_30_signflip_acc_std"] = round(tm_30[1], 2) if tm_30 and tm_30[1] is not None else None
 
-    f32_bytes = con.execute("SELECT AVG(bytes_per_client_round) FROM runs WHERE wire_precision='Float32'").fetchone()[0]
-    int8_bytes = con.execute("SELECT AVG(bytes_per_client_round) FROM runs WHERE wire_precision='INT8'").fetchone()[0]
+    f32_bytes = con.execute("SELECT AVG(bytes_per_client_round) FROM runs WHERE experiment_type='grid' AND wire_precision='Float32'").fetchone()[0]
+    int8_bytes = con.execute("SELECT AVG(bytes_per_client_round) FROM runs WHERE experiment_type='grid' AND wire_precision='INT8'").fetchone()[0]
     if f32_bytes and int8_bytes:
         metrics["f32_kb_per_client_round"] = round(f32_bytes / 1024.0, 1)
         metrics["int8_kb_per_client_round"] = round(int8_bytes / 1024.0, 1)
