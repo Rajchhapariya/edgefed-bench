@@ -1,10 +1,12 @@
 """EdgeFed-Bench: Benchmark Orchestrator and Simulation Runner.
 
-Executes a grid of 4 controlled experimental regimes:
+Executes a grid of controlled experimental regimes:
 1. Baseline FedAvg (Honest clients, Float32).
-2. Poisoned FedAvg (20% Byzantine attackers, Float32).
-3. Defended Multi-Krum (20% Byzantine attackers, Float32).
-4. Quantized Defended Multi-Krum (20% Byzantine attackers, INT8 Quantized).
+2. Poisoned FedAvg (Byzantine attackers, Float32).
+3. Defended Multi-Krum (Byzantine attackers, Float32).
+4. Quantized Defended Multi-Krum (Byzantine attackers, INT8 Quantized).
+5. Defended Coordinate-Median.
+6. Defended Trimmed-Mean.
 
 Logs telemetry to DuckDB and outputs a comparative benchmark summary.
 """
@@ -75,6 +77,7 @@ def run_regime(
     y_test: np.ndarray,
     initial_weights: np.ndarray,
     attack_type: str = "sign_flip",
+    seed: int = 42,
 ) -> Dict[str, Any]:
     """Runs a single controlled federated learning regime."""
     print(f"\n========================================================")
@@ -97,7 +100,11 @@ def run_regime(
     global_model.set_flat_parameters(initial_weights)
 
     num_byzantine = int(num_clients * byzantine_ratio)
-    byzantine_ids = list(range(num_byzantine))  # First f clients designated as Byzantine
+    byzantine_ids = ByzantineAdversary.select_byzantine_clients(
+        num_clients=num_clients,
+        num_byzantine=num_byzantine,
+        seed=seed,
+    )
 
     total_payload_bytes = 0
     successful_mitigations = 0
@@ -113,7 +120,12 @@ def run_regime(
         # Local client edge training
         client_updates = []
         for client in clients:
-            upd = client.train_round(current_weights, quantize=quantize)
+            upd = client.train_round(
+                current_weights,
+                quantize=quantize,
+                round_num=round_num,
+                seed=seed,
+            )
             client_updates.append(upd)
             total_payload_bytes += upd.payload_bytes
 
@@ -140,7 +152,7 @@ def run_regime(
                 byzantine_client_ids=byzantine_ids,
                 attack_type=attack_type,
                 scaling_factor=2.5,
-                seed=42 + round_num,
+                seed=(seed * 10_000) + (round_num * 100),
             )
         else:
             corrupted_vectors = raw_vectors
@@ -162,7 +174,15 @@ def run_regime(
         elif aggregation_method in ("Coordinate-Median", "Median"):
             aggregated_vector = RobustAggregator.coordinate_median(corrupted_vectors)
             mitigation_eval_rounds += 1
-            if float(np.mean(aggregated_vector)) > 0.0:
+            if np.all(np.isfinite(aggregated_vector)):
+                successful_mitigations += 1
+        elif aggregation_method in ("Trimmed-Mean", "TrimmedMean", "Trimmed_Mean"):
+            aggregated_vector = RobustAggregator.trimmed_mean(
+                corrupted_vectors,
+                num_byzantine=num_byzantine,
+            )
+            mitigation_eval_rounds += 1
+            if np.all(np.isfinite(aggregated_vector)):
                 successful_mitigations += 1
         else:
             raise ValueError(f"Unknown aggregation method: {aggregation_method}")
@@ -223,6 +243,7 @@ def main():
     parser.add_argument("--batch_size", type=int, default=128, help="Client batch size (default: 128)")
     parser.add_argument("--lr", type=float, default=0.05, help="Client learning rate (default: 0.05)")
     parser.add_argument("--data_root", type=str, default="data", help="Data directory (default: data)")
+    parser.add_argument("--seed", type=int, default=42, help="Master random seed (default: 42)")
     parser.add_argument(
         "--attack_type",
         type=str,
@@ -240,7 +261,7 @@ def main():
     print("==================================================================")
     print("EdgeFed-Bench: Byzantine-Robust Federated Learning Benchmark")
     print("==================================================================")
-    print(f"Configuration: {args.clients} clients, alpha={args.alpha}, rounds={args.rounds}, attack={args.attack_type}")
+    print(f"Configuration: {args.clients} clients, alpha={args.alpha}, rounds={args.rounds}, attack={args.attack_type}, seed={args.seed}")
 
     client_shards_dir = os.path.join(args.data_root, "clients")
     if (
@@ -253,6 +274,7 @@ def main():
             data_root=args.data_root,
             num_clients=args.clients,
             alpha=args.alpha,
+            seed=args.seed,
             force_rebuild=args.force_rebuild,
         )
 
@@ -263,7 +285,7 @@ def main():
     telemetry = TelemetryEngine(db_path=os.path.join(args.data_root, "telemetry.duckdb"))
 
     # Initial model weights for fair cross-regime evaluation
-    torch.manual_seed(42)
+    torch.manual_seed(args.seed)
     initial_model = EdgeClassifier()
     initial_weights = initial_model.get_flat_parameters()
 
@@ -312,6 +334,7 @@ def main():
             y_test=y_test,
             initial_weights=initial_weights,
             attack_type=args.attack_type,
+            seed=args.seed,
         )
         benchmark_results.append(res)
 

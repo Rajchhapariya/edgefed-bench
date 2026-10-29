@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import duckdb
 import numpy as np
@@ -128,6 +128,7 @@ class DataPartitioner:
         x_test: np.ndarray,
         y_test: np.ndarray,
         client_partitions: Dict[int, np.ndarray],
+        clients_dir: Optional[Union[str, Path]] = None,
     ) -> List[str]:
         """Serializes client partitions and the global test set into Apache Parquet files.
 
@@ -137,10 +138,13 @@ class DataPartitioner:
             x_test: Flattened feature matrix for global evaluation.
             y_test: Label vector for global evaluation.
             client_partitions: Mapping of client_id to training index arrays.
+            clients_dir: Optional directory for client Parquet shards (defaults to self.clients_dir).
 
         Returns:
             List of absolute paths to generated client Parquet files.
         """
+        target_dir = Path(clients_dir) if clients_dir is not None else self.clients_dir
+        target_dir.mkdir(parents=True, exist_ok=True)
         generated_paths = []
 
         # Export individual client partition shards
@@ -159,7 +163,7 @@ class DataPartitioner:
                 names=["client_id", "sample_id", "label", "features"],
             )
 
-            out_path = self.clients_dir / f"client_{client_id:02d}.parquet"
+            out_path = target_dir / f"client_{client_id:02d}.parquet"
             pq.write_table(table, str(out_path), compression="snappy")
             generated_paths.append(str(out_path.resolve()))
 
@@ -180,9 +184,19 @@ class DataPartitioner:
 class EdgeStore:
     """DuckDB-backed query interface for edge nodes and server evaluation."""
 
-    def __init__(self, data_root: str = "data"):
+    def __init__(
+        self,
+        data_root: str = "data",
+        seed: Optional[int] = None,
+        clients_dir: Optional[Union[str, Path]] = None,
+    ):
         self.data_root = Path(data_root)
-        self.clients_dir = self.data_root / "clients"
+        if clients_dir is not None:
+            self.clients_dir = Path(clients_dir)
+        elif seed is not None and seed != 42:
+            self.clients_dir = self.data_root / f"clients_seed_{seed}"
+        else:
+            self.clients_dir = self.data_root / "clients"
         self.test_parquet_path = self.data_root / "test.parquet"
         self.con = duckdb.connect()
 
@@ -380,6 +394,7 @@ def initialize_storage_pipeline(
     alpha: float = 0.5,
     seed: int = 42,
     force_rebuild: bool = False,
+    clients_dir: Optional[Union[str, Path]] = None,
 ) -> Tuple[List[str], Dict[str, Any]]:
     """Convenience bootstrap function to load, partition, and persist shards.
 
@@ -389,23 +404,32 @@ def initialize_storage_pipeline(
         alpha: Dirichlet concentration parameter for non-IID label skew.
         seed: Random seed for partition reproducibility.
         force_rebuild: If True, regenerates and overwrites existing Parquet shards.
+        clients_dir: Optional custom path for client shards (defaults to clients or clients_seed_{seed}).
 
     Returns:
         Tuple of (list of parquet file paths, summary dictionary).
     """
-    clients_dir = Path(data_root) / "clients"
+    if clients_dir is not None:
+        target_clients_dir = Path(clients_dir)
+    elif seed != 42:
+        target_clients_dir = Path(data_root) / f"clients_seed_{seed}"
+    else:
+        target_clients_dir = Path(data_root) / "clients"
+
+    target_clients_dir.mkdir(parents=True, exist_ok=True)
     test_parquet_path = Path(data_root) / "test.parquet"
-    expected_shards = [clients_dir / f"client_{i:02d}.parquet" for i in range(num_clients)]
+    expected_shards = [target_clients_dir / f"client_{i:02d}.parquet" for i in range(num_clients)]
     shards_exist = all(p.exists() for p in expected_shards) and test_parquet_path.exists()
 
     if shards_exist and not force_rebuild:
         print(
-            f"[!] {num_clients} client shards and test.parquet already exist. "
+            f"[!] {num_clients} client shards and test.parquet already exist at {target_clients_dir}. "
             f"Skipping rebuild. Pass force_rebuild=True to overwrite."
         )
         return [str(p.resolve()) for p in expected_shards], {
             "num_clients": num_clients,
             "alpha": alpha,
+            "seed": seed,
             "parquet_files": num_clients,
             "skipped": True,
         }
@@ -424,6 +448,7 @@ def initialize_storage_pipeline(
         x_test=x_test,
         y_test=y_test,
         client_partitions=partitions,
+        clients_dir=target_clients_dir,
     )
 
     telemetry = TelemetryEngine(db_path=os.path.join(data_root, "telemetry.duckdb"))
@@ -432,6 +457,7 @@ def initialize_storage_pipeline(
     summary = {
         "num_clients": num_clients,
         "alpha": alpha,
+        "seed": seed,
         "train_samples": len(y_train),
         "test_samples": len(y_test),
         "parquet_files": len(paths),

@@ -16,6 +16,26 @@ class ByzantineAdversary:
     """Simulates rogue edge nodes executing Byzantine attack vectors."""
 
     @staticmethod
+    def select_byzantine_clients(num_clients: int, num_byzantine: int, seed: int = 42) -> List[int]:
+        """Deterministically selects Byzantine client IDs using the seed.
+
+        Args:
+            num_clients: Total number of clients N.
+            num_byzantine: Number of Byzantine attackers f.
+            seed: Master random seed.
+
+        Returns:
+            Sorted list of selected Byzantine client IDs.
+        """
+        if num_byzantine <= 0:
+            return []
+        if num_byzantine >= num_clients:
+            return list(range(num_clients))
+        rng = np.random.default_rng(seed + 1000)
+        chosen = rng.choice(num_clients, size=num_byzantine, replace=False)
+        return sorted(int(c) for c in chosen)
+
+    @staticmethod
     def sign_flip(update: np.ndarray, scaling_factor: float = 2.5) -> np.ndarray:
         """Executes a sign-flip attack.
 

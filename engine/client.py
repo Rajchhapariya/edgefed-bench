@@ -96,12 +96,16 @@ class EdgeClient:
         self,
         global_params: np.ndarray,
         quantize: bool = False,
+        round_num: int = 1,
+        seed: Optional[int] = None,
     ) -> ClientUpdate:
         """Executes one round of local training starting from global model weights.
 
         Args:
             global_params: Continuous float32 array of global weights.
             quantize: If True, compresses the parameter update vector to INT8.
+            round_num: Current communication round index (for deterministic shuffling).
+            seed: Master random seed for deterministic execution.
 
         Returns:
             ClientUpdate containing update vector, transmission payload size, and telemetry.
@@ -116,8 +120,13 @@ class EdgeClient:
         # Each round begins from incoming global_params with a fresh optimizer state.
         optimizer = torch.optim.SGD(self.model.parameters(), lr=self.lr, momentum=0.9)
 
-        # DataLoader is re-created per round to reshuffle the local dataset for each pass.
-        loader = DataLoader(self.dataset, batch_size=self.batch_size, shuffle=True)
+        # DataLoader is re-created per round to reshuffle the local dataset.
+        # Deterministic PyTorch generator ensures exact reproducibility across runs.
+        if seed is not None:
+            gen = torch.Generator().manual_seed((seed * 100_000) + (round_num * 1000) + self.client_id)
+            loader = DataLoader(self.dataset, batch_size=self.batch_size, shuffle=True, generator=gen)
+        else:
+            loader = DataLoader(self.dataset, batch_size=self.batch_size, shuffle=True)
 
         running_loss = 0.0
         batches = 0

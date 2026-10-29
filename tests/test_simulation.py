@@ -123,6 +123,67 @@ class TestSimulationEngine(unittest.TestCase):
         self.assertGreater(result["final_accuracy"], 0.0)
         self.assertEqual(result["mitigation_rate"], 100.0)
 
+    def test_05_seed_determinism_exact_match(self):
+        """Verify two independent runs with identical config and seed give exact matching accuracy."""
+        seed = 77
+        num_rounds = 2
+        num_clients = 4
+        byzantine_ratio = 0.25
+
+        # Run 1
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        model_1 = EdgeClassifier()
+        init_weights_1 = model_1.get_flat_parameters()
+
+        res_1 = run_regime(
+            regime_name="Determinism_Run_1",
+            aggregation_method="Multi-Krum",
+            byzantine_ratio=byzantine_ratio,
+            quantize=True,
+            num_rounds=num_rounds,
+            num_clients=num_clients,
+            batch_size=256,
+            lr=0.05,
+            store=self.store,
+            telemetry=self.telemetry,
+            experiment_id="test_det_1",
+            x_test=self.x_test,
+            y_test=self.y_test,
+            initial_weights=init_weights_1,
+            attack_type="gaussian",
+            seed=seed,
+        )
+
+        # Run 2
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        model_2 = EdgeClassifier()
+        init_weights_2 = model_2.get_flat_parameters()
+
+        res_2 = run_regime(
+            regime_name="Determinism_Run_2",
+            aggregation_method="Multi-Krum",
+            byzantine_ratio=byzantine_ratio,
+            quantize=True,
+            num_rounds=num_rounds,
+            num_clients=num_clients,
+            batch_size=256,
+            lr=0.05,
+            store=self.store,
+            telemetry=self.telemetry,
+            experiment_id="test_det_2",
+            x_test=self.x_test,
+            y_test=self.y_test,
+            initial_weights=init_weights_2,
+            attack_type="gaussian",
+            seed=seed,
+        )
+
+        # Exact match assertion on CPU
+        self.assertEqual(res_1["final_accuracy"], res_2["final_accuracy"])
+        self.assertAlmostEqual(res_1["final_loss"], res_2["final_loss"], places=7)
+
 
 if __name__ == "__main__":
     unittest.main()
