@@ -20,7 +20,7 @@ While uniform gradient quantization reduces transmission volume, it introduces q
 ## 2. Key Findings
 
 - **75.0% Uplink Bandwidth Reduction:** Symmetric INT8 quantization compresses local update vectors from 397.5 KB to 99.4 KB per client round ($101{,}770$ INT8 weights $+ 4$ bytes float32 scale scalar), reducing total communication volume from 388.2 MB to 97.1 MB across 50 rounds.
-- **Outlier Rejection Invariance:** Multi-Krum achieves a **100.0% attacker rejection rate** under Gaussian attacks and **90.8% to 99.8%** under sign-flip attacks with both Float32 and INT8 quantization. Because INT8 quantization noise is strictly bounded ($\|e\|_\infty \le S / 2$), the maximum Euclidean perturbation across honest updates is negligible compared to the separation distance induced by adversarial attacks ($\|\mathbf{v}_{\text{honest}} - \mathbf{v}_{\text{byz}}\|_2 \gg S\sqrt{D}$).
+- **Outlier Rejection Invariance:** Multi-Krum achieves a **100.0% attacker rejection rate** under Gaussian attacks and **90.8% to 99.8%** under sign-flip attacks with both Float32 and INT8 quantization. Rejection rates are identical to two decimals at both precisions. A likely reason is that per-element INT8 error is bounded by S/2, which is small next to the distance between honest and attacker updates; this run measured the outcome, not that distance, so treat the explanation as a hypothesis.
 - **Convergence Parity:** Under 20% Byzantine attackers and non-IID Dirichlet label skew ($\alpha = 0.5$), Quantized Defended Multi-Krum converges to **84.90% $\pm$ 0.26% test accuracy**, matching the unquantized Float32 baseline (**84.89% $\pm$ 0.24%**), while unmitigated FedAvg collapses to **10.00%** under 30% sign-flip.
 - **Asymmetric Vulnerability to Assumed $f$:** Underestimating the attacker count ($f_\text{assumed} = 2$ when actual $f = 6$) causes Multi-Krum to drop to **51.65%** and Trimmed Mean to **17.61%**, whereas overestimating ($f_\text{assumed} = 8 > 6$) preserves **84.25%** and **80.08%** accuracy.
 
@@ -87,28 +87,23 @@ Isolation and false-exclusion rates across communication rounds:
 
 ```
 edgefed-bench/
-├── .gitignore
-├── requirements.txt              # Core runtime dependencies
-├── simulate.py                   # Multi-regime benchmark orchestrator & telemetry logger
-├── verify_storage.py             # Phase 1 standalone storage validation script
-├── data/
-│   ├── cache/                    # Download cache for raw Fashion-MNIST
-│   ├── clients/                  # 20 client Apache Parquet shards (client_00 to client_19)
-│   ├── test.parquet              # Global evaluation partition
-│   └── telemetry.duckdb          # Analytical SQL telemetry database
+├── requirements.txt
+├── simulate.py                   # Single-run orchestrator and telemetry logger (early regimes)
+├── verify_storage.py             # Standalone storage validation script
+├── data/                         # Parquet client shards, test split, telemetry (generated)
 ├── engine/
-│   ├── __init__.py
 │   ├── storage.py                # Dirichlet partitioner, Snappy Parquet I/O, DuckDB EdgeStore
-│   ├── quantization.py           # Uniform symmetric INT8 quantizer & SQNR analyzer
-│   ├── client.py                 # EdgeClassifier model & local stateless SGD optimization
-│   ├── adversary.py              # Byzantine attack vectors (sign-flip and Gaussian injection)
-│   └── aggregator.py             # Server aggregation: FedAvg, Coordinate Median, Multi-Krum
-└── tests/
-    ├── __init__.py
-    ├── test_storage.py           # 6 unit tests for Parquet sharding, DuckDB CRUD & idempotency
-    ├── test_quantization_client.py # 6 unit tests for INT8 bounds, noise metrics & edge SGD
-    ├── test_adversary_aggregator.py # 5 unit tests for attacks, FedAvg failure & Multi-Krum
-    └── test_simulation.py        # 4 unit tests for orchestrator, eval, and defense smoke tests
+│   ├── quantization.py           # Uniform symmetric INT8 quantizer and SQNR analyzer
+│   ├── client.py                 # EdgeClassifier model and local SGD
+│   ├── adversary.py              # Sign-flip and Gaussian attacks
+│   └── aggregator.py             # FedAvg, Coordinate Median, Trimmed Mean, Multi-Krum
+├── experiments/
+│   ├── config.yaml               # Grid and wrong-f definitions
+│   ├── run_grid.py               # Resumable grid runner, writes results/results.duckdb
+│   └── make_report_assets.py     # Figures, README tables, report data from the database
+├── results/                      # results.duckdb, figures, ENVIRONMENT.md
+├── report/                       # Typst report, generated tables and summary_metrics.json
+└── tests/                        # Storage, quantization, attacks and aggregators, simulation, grid runner
 ```
 
 ### Why DuckDB + Apache Parquet for Edge Simulation?
@@ -159,61 +154,46 @@ cd edgefed-bench
 pip install -r requirements.txt
 ```
 
-### 6.2. Run Automated Test Suite (21 Tests)
+### 6.2. Run Automated Test Suite
 
 ```bash
 python -m unittest discover tests -v
 ```
 
-All 21 tests covering Parquet storage, Dirichlet partitioning, INT8 mathematical bounds, Byzantine corruption, Multi-Krum isolation, and end-to-end simulations run in approximately 3 seconds.
+The suite covers Parquet storage, Dirichlet partitioning, INT8 bounds, attacks, the four aggregators, the simulation loop and the grid runner.
 
 ### 6.3. Execute Benchmark Simulation
 
-Run standard benchmark across all 4 experimental regimes:
+Run the full grid (280 robustness runs plus 40 wrong-f runs). Each finished run is stored under a config hash in `results/results.duckdb`, so an interrupted run resumes where it stopped:
 
 ```bash
-# Default: 5 communication rounds, 20 clients, alpha=0.5, sign-flip attack
-python simulate.py --rounds 5 --clients 20 --alpha 0.5
-
-# Test Gaussian noise explosion attack vector
-python simulate.py --rounds 3 --clients 20 --attack_type gaussian
-
-# Force re-partitioning and Parquet shard generation
-python simulate.py --rounds 5 --clients 20 --force_rebuild
+python experiments/run_grid.py --dry_run          # list configs without running
+python experiments/run_grid.py --experiment all
+python experiments/make_report_assets.py          # rewrites the results block above, figures and report data
 ```
 
-### 6.4. Inspect Analytical SQL Telemetry
+`simulate.py` runs a single configuration for quick checks:
+
+```bash
+python simulate.py --rounds 5 --clients 20 --alpha 0.5
+```
+
+### 6.4. Inspect Results
 
 Query stored experiment metrics directly via DuckDB CLI or Python:
 
 ```python
 import duckdb
 
-con = duckdb.connect("data/telemetry.duckdb")
-
-# Inspect regime comparison
+con = duckdb.connect("results/results.duckdb", read_only=True)
 print(con.execute("""
-    SELECT
-        regime_name,
-        ROUND(MAX(global_accuracy), 2) AS peak_acc,
-        ROUND(MIN(global_loss), 4) AS best_loss,
-        ROUND(AVG(round_duration_sec), 2) AS avg_duration_sec
-    FROM global_eval
-    GROUP BY regime_name
-    ORDER BY regime_name
+    SELECT aggregator, attack, attacker_share, wire_precision,
+           COUNT(*) AS runs, ROUND(AVG(final_accuracy), 2) AS mean_acc
+    FROM runs
+    WHERE experiment_type = 'grid'
+    GROUP BY ALL
+    ORDER BY 1, 2, 3, 4
 """).fetchdf())
-
-# Query uplink bandwidth savings
-print(con.execute("""
-    SELECT
-        regime_name,
-        quantized,
-        COUNT(*) AS total_client_rounds,
-        ROUND(SUM(payload_bytes) / (1024.0 * 1024.0), 2) AS total_transmitted_mb
-    FROM round_telemetry
-    GROUP BY regime_name, quantized
-""").fetchdf())
-
 con.close()
 ```
 
