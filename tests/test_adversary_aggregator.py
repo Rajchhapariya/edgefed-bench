@@ -174,6 +174,14 @@ class TestAdversaryAndAggregator(unittest.TestCase):
             RobustAggregator.trimmed_mean(updates, num_byzantine=2)
         self.assertIn("2*k < N", str(ctx.exception))
 
+    def test_10_multi_krum_rejects_invalid_f(self):
+        """Verify Multi-Krum raises ValueError when 2f + 2 >= N (e.g. f=9 with N=20)."""
+        updates = [np.zeros(10, dtype=np.float32) for _ in range(20)]
+        # For N = 20, f = 9: 2*9 + 2 = 20 >= 20
+        with self.assertRaises(ValueError) as ctx:
+            RobustAggregator.multi_krum(updates, num_byzantine=9)
+        self.assertIn("2f + 2 < N", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

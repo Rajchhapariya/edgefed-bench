@@ -143,9 +143,20 @@ For $N$ client updates $\{\mathbf{v}_1, \dots, \mathbf{v}_N\}$ with up to $f$ By
 
 ---
 
-## 6. Reproduction & Execution
+## 6. System Limitations
 
-### 6.1. Environment Setup
+To maintain academic rigor and transparent reproducibility, the experimental boundaries of this benchmark are explicitly outlined:
+
+1. **Single-Machine Simulation:** All experiments execute on a single physical host utilizing virtualized local processes rather than distributed edge hardware (such as Raspberry Pi or NVIDIA Jetson clusters). As a result, asynchronous network jitter, packet drops, and thermal throttling on physical edge devices are not modeled.
+2. **Model and Task Complexity:** Benchmarks are conducted using a compact Multi-Layer Perceptron (101,770 parameters) on Fashion-MNIST under Dirichlet non-IID label skew ($\alpha = 0.5$). Deep convolutional networks (e.g., ResNet) or Vision Transformers over higher-dimensional feature spaces may introduce different gradient sparsity and noise dynamics.
+3. **Server Oracle Knowledge:** In the main 280-run factorial grid, the central aggregator is configured with the exact attacker count $f$. The impact of misconfigured or unknown Byzantine fractions is analyzed separately in the dedicated wrong-$f$ benchmark (Section 3.4).
+4. **Absence of Differential Privacy:** The benchmark evaluates Byzantine-resilient aggregation and uniform gradient quantization in isolation without Differential Privacy (DP) mechanisms (such as gradient clipping or Laplacian/Gaussian noise injection), which may interact with INT8 quantization error bounds.
+
+---
+
+## 7. Reproduction & Execution
+
+### 7.1. Environment Setup
 
 ```bash
 git clone https://github.com/Rajchhapariya/edgefed-bench.git
@@ -153,7 +164,7 @@ cd edgefed-bench
 pip install -r requirements.txt
 ```
 
-### 6.2. Run Automated Test Suite
+### 7.2. Run Automated Test Suite
 
 ```bash
 python -m unittest discover tests -v
@@ -161,7 +172,7 @@ python -m unittest discover tests -v
 
 The suite covers Parquet storage, Dirichlet partitioning, INT8 bounds, attacks, the four aggregators, the simulation loop and the grid runner.
 
-### 6.3. Execute Benchmark Simulation
+### 7.3. Execute Benchmark Simulation
 
 Run the full grid (280 robustness runs plus 40 wrong-f runs). Each finished run is stored under a config hash in `results/results.duckdb`, so an interrupted run resumes where it stopped:
 
@@ -177,7 +188,7 @@ python experiments/make_report_assets.py          # rewrites the results block a
 python simulate.py --rounds 5 --clients 20 --alpha 0.5
 ```
 
-### 6.4. Inspect Results
+### 7.4. Inspect Results
 
 Query stored experiment metrics directly via DuckDB CLI or Python:
 
@@ -198,7 +209,7 @@ con.close()
 
 ---
 
-## 7. Selected References
+## 8. Selected References
 
 1. **Blanchard, P., El Mhamdi, E. M., Guerraoui, R., & Stainer, J. (2017).** Machine learning with adversaries: Byzantine tolerant gradient descent. _Advances in Neural Information Processing Systems (NeurIPS 2017)_, 30.
 2. **McMahan, B., Moore, E., Ramage, D., Hampson, S., & y Arcas, B. A. (2017).** Communication-efficient learning of deep networks from decentralized data. _Artificial Intelligence and Statistics (AISTATS 2017)_, 1273-1282.

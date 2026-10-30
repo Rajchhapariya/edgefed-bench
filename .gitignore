@@ -15,6 +15,7 @@ data/*.duckdb
 *.duckdb
 *.duckdb.wal
 *.duckdb.tmp
+!results/results.duckdb
 
 # Environments
 .venv/

@@ -20,7 +20,7 @@ This document details the exact host environment, hardware profile, system softw
 - **PyTorch:** 2.14.0 (CPU build)
 - **DuckDB:** 1.5.6
 - **PyArrow:** 26.0.0
-- **NumPy:** 2.2.3
+- **NumPy:** 2.4.6
 - **Matplotlib:** 3.11.2
 - **PyYAML:** 6.0.3
 - **Typst Compiler:** Typst 0.15.1 (`9dfd3a08`)

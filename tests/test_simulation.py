@@ -46,10 +46,10 @@ class TestSimulationEngine(unittest.TestCase):
         result = run_regime(
             regime_name="Smoke_Test_MultiKrum",
             aggregation_method="Multi-Krum",
-            byzantine_ratio=0.25,  # 1 out of 4 clients
+            byzantine_ratio=0.20,  # 1 out of 5 clients
             quantize=True,
             num_rounds=1,
-            num_clients=4,
+            num_clients=5,
             batch_size=256,
             lr=0.05,
             store=self.store,
@@ -76,10 +76,10 @@ class TestSimulationEngine(unittest.TestCase):
         result = run_regime(
             regime_name="Smoke_Test_Gaussian_MultiKrum",
             aggregation_method="Multi-Krum",
-            byzantine_ratio=0.25,
+            byzantine_ratio=0.20,
             quantize=False,
             num_rounds=1,
-            num_clients=4,
+            num_clients=5,
             batch_size=256,
             lr=0.05,
             store=self.store,
@@ -104,10 +104,10 @@ class TestSimulationEngine(unittest.TestCase):
         result = run_regime(
             regime_name="Smoke_Test_Coordinate_Median",
             aggregation_method="Coordinate-Median",
-            byzantine_ratio=0.25,
+            byzantine_ratio=0.20,
             quantize=False,
             num_rounds=1,
-            num_clients=4,
+            num_clients=5,
             batch_size=256,
             lr=0.05,
             store=self.store,
@@ -127,8 +127,8 @@ class TestSimulationEngine(unittest.TestCase):
         """Verify two independent runs with identical config and seed give exact matching accuracy."""
         seed = 77
         num_rounds = 2
-        num_clients = 4
-        byzantine_ratio = 0.25
+        num_clients = 5
+        byzantine_ratio = 0.20
 
         # Run 1
         torch.manual_seed(seed)
@@ -183,6 +183,75 @@ class TestSimulationEngine(unittest.TestCase):
         # Exact match assertion on CPU
         self.assertEqual(res_1["final_accuracy"], res_2["final_accuracy"])
         self.assertAlmostEqual(res_1["final_loss"], res_2["final_loss"], places=7)
+
+    def test_06_seed_controls_all_five_spec_factors(self):
+        """Verify that a single seed controls:
+        1. Dirichlet partition
+        2. Model initialisation
+        3. Which client IDs are Byzantine
+        4. Gaussian attack noise
+        5. Data shuffling inside clients
+        Two runs with the same seed must match on each; two different seeds must differ on each.
+        """
+        from engine.adversary import ByzantineAdversary
+        from engine.client import EdgeClient
+        from engine.storage import DataPartitioner
+
+        seed_a = 42
+        seed_b = 42
+        seed_c = 99
+
+        # 1. Dirichlet partition
+        labels_dummy = np.tile(np.arange(10), 100)  # 1000 samples
+        partitioner = DataPartitioner(self.data_root)
+        part_a = partitioner.partition_dirichlet(labels_dummy, num_clients=5, alpha=0.5, seed=seed_a)
+        part_b = partitioner.partition_dirichlet(labels_dummy, num_clients=5, alpha=0.5, seed=seed_b)
+        part_c = partitioner.partition_dirichlet(labels_dummy, num_clients=5, alpha=0.5, seed=seed_c)
+
+        for cid in range(5):
+            np.testing.assert_array_equal(part_a[cid], part_b[cid])
+        diff_count = sum(not np.array_equal(part_a[cid], part_c[cid]) for cid in range(5))
+        self.assertGreater(diff_count, 0)
+
+        # 2. Model initialisation
+        torch.manual_seed(seed_a)
+        weights_a = EdgeClassifier().get_flat_parameters()
+        torch.manual_seed(seed_b)
+        weights_b = EdgeClassifier().get_flat_parameters()
+        torch.manual_seed(seed_c)
+        weights_c = EdgeClassifier().get_flat_parameters()
+
+        np.testing.assert_array_equal(weights_a, weights_b)
+        self.assertFalse(np.array_equal(weights_a, weights_c))
+
+        # 3. Which client IDs are Byzantine
+        byz_a = ByzantineAdversary.select_byzantine_clients(num_clients=20, num_byzantine=6, seed=seed_a)
+        byz_b = ByzantineAdversary.select_byzantine_clients(num_clients=20, num_byzantine=6, seed=seed_b)
+        byz_c = ByzantineAdversary.select_byzantine_clients(num_clients=20, num_byzantine=6, seed=seed_c)
+
+        self.assertEqual(byz_a, byz_b)
+        self.assertNotEqual(byz_a, byz_c)
+
+        # 4. Gaussian attack noise
+        ref_shape = np.zeros(100, dtype=np.float32)
+        noise_a = ByzantineAdversary.gaussian_noise(ref_shape, std=5.0, seed=seed_a)
+        noise_b = ByzantineAdversary.gaussian_noise(ref_shape, std=5.0, seed=seed_b)
+        noise_c = ByzantineAdversary.gaussian_noise(ref_shape, std=5.0, seed=seed_c)
+
+        np.testing.assert_array_equal(noise_a, noise_b)
+        self.assertFalse(np.array_equal(noise_a, noise_c))
+
+        # 5. Data shuffling inside clients
+        client_a = EdgeClient(client_id=0, store=self.store, lr=0.05, batch_size=64, local_epochs=1)
+        client_b = EdgeClient(client_id=0, store=self.store, lr=0.05, batch_size=64, local_epochs=1)
+        client_c = EdgeClient(client_id=0, store=self.store, lr=0.05, batch_size=64, local_epochs=1)
+
+        upd_a = client_a.train_round(weights_a, quantize=False, round_num=1, seed=seed_a)
+        upd_b = client_b.train_round(weights_a, quantize=False, round_num=1, seed=seed_b)
+        upd_c = client_c.train_round(weights_a, quantize=False, round_num=1, seed=seed_c)
+
+        np.testing.assert_array_equal(upd_a.update, upd_b.update)
+        self.assertFalse(np.array_equal(upd_a.update, upd_c.update))
 
 
 if __name__ == "__main__":

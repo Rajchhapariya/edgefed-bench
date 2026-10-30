@@ -161,10 +161,12 @@ class RobustAggregator:
             raise ValueError("No updates provided to Multi-Krum.")
 
         f = num_byzantine
-        # Theoretical safety condition
+        # Theoretical safety condition (Blanchard et al., NeurIPS 2017)
         if 2 * f + 2 >= num_clients:
-            # Clamp f to maximum safe bound if needed
-            f = max(0, (num_clients - 3) // 2)
+            raise ValueError(
+                f"Multi-Krum requires 2f + 2 < N to guarantee Byzantine resilience, "
+                f"but got 2*{f} + 2 = {2 * f + 2} >= {num_clients}."
+            )
 
         if m_candidates is None:
             m = max(1, num_clients - f)

@@ -1,0 +1,100 @@
+test_01_byzantine_attacks (test_adversary_aggregator.TestAdversaryAndAggregator.test_01_byzantine_attacks)
+Verify mathematical properties of sign-flip and Gaussian attacks. ... ok
+test_02_fed_avg_poisoning_vulnerability (test_adversary_aggregator.TestAdversaryAndAggregator.test_02_fed_avg_poisoning_vulnerability)
+Verify that standard FedAvg fails when 20% of nodes execute a sign-flip attack. ... ok
+test_03_coordinate_median_resilience (test_adversary_aggregator.TestAdversaryAndAggregator.test_03_coordinate_median_resilience)
+Verify that Coordinate-wise Median rejects the 20% sign-flip attackers. ... ok
+test_04_multi_krum_outlier_rejection (test_adversary_aggregator.TestAdversaryAndAggregator.test_04_multi_krum_outlier_rejection)
+Verify Multi-Krum detects and rejects all 4 Byzantine nodes in Float32. ... ok
+test_05_quantized_multi_krum_defense_resilience (test_adversary_aggregator.TestAdversaryAndAggregator.test_05_quantized_multi_krum_defense_resilience)
+Verify Multi-Krum still isolates all Byzantine nodes under INT8 quantization noise. ... ok
+test_06_trimmed_mean_hand_computed (test_adversary_aggregator.TestAdversaryAndAggregator.test_06_trimmed_mean_hand_computed)
+Verify coordinate-wise trimmed mean against a hand-computed 5-client example. ... ok
+test_07_trimmed_mean_k_zero_equals_fedavg (test_adversary_aggregator.TestAdversaryAndAggregator.test_07_trimmed_mean_k_zero_equals_fedavg)
+Verify trimmed mean with k=0 is numerically identical to plain FedAvg. ... ok
+test_08_trimmed_mean_ignores_extreme_outlier (test_adversary_aggregator.TestAdversaryAndAggregator.test_08_trimmed_mean_ignores_extreme_outlier)
+Verify trimmed mean ignores a single massive adversarial outlier coordinate. ... ok
+test_09_trimmed_mean_rejects_invalid_k (test_adversary_aggregator.TestAdversaryAndAggregator.test_09_trimmed_mean_rejects_invalid_k)
+Verify trimmed mean raises ValueError when 2k >= N. ... ok
+test_10_multi_krum_rejects_invalid_f (test_adversary_aggregator.TestAdversaryAndAggregator.test_10_multi_krum_rejects_invalid_f)
+Verify Multi-Krum raises ValueError when 2f + 2 >= N (e.g. f=9 with N=20). ... ok
+test_01_grid_generation_counts (test_grid_runner.TestGridRunner.test_01_grid_generation_counts)
+Verify grid configurations generate exactly 280 main grid runs and 40 wrong-f runs. ... ok
+test_02_config_hash_determinism (test_grid_runner.TestGridRunner.test_02_config_hash_determinism)
+Verify compute_config_hash yields exact same hash across independent calls. ... ok
+test_03_execute_single_run_and_duckdb_persistence (test_grid_runner.TestGridRunner.test_03_execute_single_run_and_duckdb_persistence)
+Smoke test executing a fast 2-round run and verifying DuckDB schema insertion. ... ok
+test_01_quantize_dequantize_bounds (test_quantization_client.TestQuantizationAndClient.test_01_quantize_dequantize_bounds)
+Verify INT8 quantization produces int8 types within [-127, 127] and strictly bounded error. ... ok
+test_02_all_zeros_and_extreme_inputs (test_quantization_client.TestQuantizationAndClient.test_02_all_zeros_and_extreme_inputs)
+Verify numerical stability on degenerate arrays (zeros, single-element, extreme magnitudes). ... ok
+test_03_payload_bandwidth_savings (test_quantization_client.TestQuantizationAndClient.test_03_payload_bandwidth_savings)
+Verify that INT8 quantization cuts network payload by ~75% on 101,770 model parameters. ... ok
+test_04_quantization_noise_metrics (test_quantization_client.TestQuantizationAndClient.test_04_quantization_noise_metrics)
+Verify SQNR, MSE, and residual norm metrics are calculated correctly. ... ok
+test_05_edge_classifier_bidirectional_parameter_sync (test_quantization_client.TestQuantizationAndClient.test_05_edge_classifier_bidirectional_parameter_sync)
+Verify flat vector synchronization into PyTorch model layers. ... ok
+test_06_edge_client_training_unquantized_and_quantized (test_quantization_client.TestQuantizationAndClient.test_06_edge_client_training_unquantized_and_quantized)
+Verify client training rounds produce valid parameter deltas and payload telemetry. ... ok
+test_01_global_model_evaluation (test_simulation.TestSimulationEngine.test_01_global_model_evaluation)
+Verify global evaluation accurately computes accuracy and loss on test shard. ... ok
+test_02_regime_execution_smoke_test (test_simulation.TestSimulationEngine.test_02_regime_execution_smoke_test)
+Verify run_regime executes 1 round across 4 clients and updates telemetry. ... ok
+test_03_regime_gaussian_attack_execution (test_simulation.TestSimulationEngine.test_03_regime_gaussian_attack_execution)
+Verify run_regime executes cleanly with Gaussian noise attack vector. ... ok
+test_04_regime_coordinate_median_execution (test_simulation.TestSimulationEngine.test_04_regime_coordinate_median_execution)
+Verify run_regime executes cleanly with Coordinate-wise Median defense. ... ok
+test_05_seed_determinism_exact_match (test_simulation.TestSimulationEngine.test_05_seed_determinism_exact_match)
+Verify two independent runs with identical config and seed give exact matching accuracy. ... ok
+test_06_seed_controls_all_five_spec_factors (test_simulation.TestSimulationEngine.test_06_seed_controls_all_five_spec_factors)
+Verify that a single seed controls: ... ok
+test_01_parquet_shards_exist (test_storage.TestStoragePipeline.test_01_parquet_shards_exist)
+Verify all 20 client Parquet shards and the global test shard exist on disk. ... ok
+test_02_sample_conservation (test_storage.TestStoragePipeline.test_02_sample_conservation)
+Verify total training samples across all 20 clients equals 60,000 and test equals 10,000. ... ok
+test_03_feature_dimensionality_and_bounds (test_storage.TestStoragePipeline.test_03_feature_dimensionality_and_bounds)
+Verify features are 784-dimensional float arrays normalized in [0.0, 1.0]. ... ok
+test_04_dirichlet_non_iid_heterogeneity (test_storage.TestStoragePipeline.test_04_dirichlet_non_iid_heterogeneity)
+Statistically verify that class distributions across clients exhibit significant variance (non-IID). ... ok
+test_05_telemetry_engine_crud (test_storage.TestStoragePipeline.test_05_telemetry_engine_crud)
+Verify TelemetryEngine creates tables, inserts records, and performs SQL aggregations. ... ok
+test_06_idempotent_pipeline_skips_rebuild (test_storage.TestStoragePipeline.test_06_idempotent_pipeline_skips_rebuild)
+Verify initialize_storage_pipeline recognizes existing shards and skips rebuild. ... ok
+
+----------------------------------------------------------------------
+Ran 31 tests in 6.555s
+
+OK
+
+========================================================
+Starting: Smoke_Test_MultiKrum
+Aggregation: Multi-Krum | Byzantine: 20% | Quantized: True
+========================================================
+Round 01/01 | Test Acc:  29.45% | Test Loss: 1.8025 | Duration: 0.18s
+
+========================================================
+Starting: Smoke_Test_Gaussian_MultiKrum
+Aggregation: Multi-Krum | Byzantine: 20% | Quantized: False
+========================================================
+Round 01/01 | Test Acc:  39.94% | Test Loss: 1.7633 | Duration: 0.17s
+
+========================================================
+Starting: Smoke_Test_Coordinate_Median
+Aggregation: Coordinate-Median | Byzantine: 20% | Quantized: False
+========================================================
+Round 01/01 | Test Acc:  36.90% | Test Loss: 1.9961 | Duration: 0.16s
+
+========================================================
+Starting: Determinism_Run_1
+Aggregation: Multi-Krum | Byzantine: 20% | Quantized: True
+========================================================
+Round 01/02 | Test Acc:  36.53% | Test Loss: 1.7644 | Duration: 0.17s
+Round 02/02 | Test Acc:  46.05% | Test Loss: 1.2821 | Duration: 0.24s
+
+========================================================
+Starting: Determinism_Run_2
+Aggregation: Multi-Krum | Byzantine: 20% | Quantized: True
+========================================================
+Round 01/02 | Test Acc:  36.53% | Test Loss: 1.7644 | Duration: 0.19s
+Round 02/02 | Test Acc:  46.05% | Test Loss: 1.2821 | Duration: 0.18s
+[!] 20 client shards and test.parquet already exist at data\clients. Skipping rebuild. Pass force_rebuild=True to overwrite.
