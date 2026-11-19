@@ -1,7 +1,6 @@
 """Unit Test Suite for Config-Driven Grid Runner and DuckDB Persistence.
 """
 
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -25,8 +24,8 @@ class TestGridRunner(unittest.TestCase):
     def setUpClass(cls):
         cls.config_path = Path("experiments/config.yaml")
         cls.data_root = "data"
-        if not os.path.exists(os.path.join(cls.data_root, "test.parquet")):
-            initialize_storage_pipeline(data_root=cls.data_root, num_clients=20, alpha=0.5, seed=0)
+        # Skips the rebuild when seed-0 shards already exist.
+        initialize_storage_pipeline(data_root=cls.data_root, num_clients=20, alpha=0.5, seed=0)
         cls.store = EdgeStore(data_root=cls.data_root, seed=0)
         cls.x_test_raw, cls.y_test_raw = cls.store.get_test_data()
         cls.x_test_t = torch.from_numpy(cls.x_test_raw).float()
@@ -42,7 +41,6 @@ class TestGridRunner(unittest.TestCase):
         self.assertEqual(len(grid_runs), 280)
         self.assertEqual(len(wrong_f_runs), 40)
 
-        # Count clean vs attacked
         clean_runs = [r for r in grid_runs if r["attack"] == "none"]
         attacked_runs = [r for r in grid_runs if r["attack"] != "none"]
         self.assertEqual(len(clean_runs), 40)

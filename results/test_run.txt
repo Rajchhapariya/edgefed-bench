@@ -18,6 +18,20 @@ test_09_trimmed_mean_rejects_invalid_k (test_adversary_aggregator.TestAdversaryA
 Verify trimmed mean raises ValueError when 2k >= N. ... ok
 test_10_multi_krum_rejects_invalid_f (test_adversary_aggregator.TestAdversaryAndAggregator.test_10_multi_krum_rejects_invalid_f)
 Verify Multi-Krum raises ValueError when 2f + 2 >= N (e.g. f=9 with N=20). ... ok
+test_05_client_uses_given_momentum (test_audit_fixes.TestClientMomentum.test_05_client_uses_given_momentum)
+Momentum 0 and momentum 0.9 give different updates from the same start. ... ok
+test_01_stored_hash_ignores_legacy_hyperparameters (test_audit_fixes.TestConfigHashHyperparameters.test_01_stored_hash_ignores_legacy_hyperparameters)
+Adding lr, batch size and momentum at their stored values keeps the hash. ... ok
+test_02_changed_hyperparameters_change_hash (test_audit_fixes.TestConfigHashHyperparameters.test_02_changed_hyperparameters_change_hash)
+A run with a different lr, batch size or momentum is not mistaken for a stored run. ... ok
+test_06_attackers_send_valid_int8 (test_audit_fixes.TestInt8AttackerWireFormat.test_06_attackers_send_valid_int8)
+With wire_int8, every attacker update is an INT8 value times one scale. ... ok
+test_07_empty_client_raises (test_audit_fixes.TestInt8AttackerWireFormat.test_07_empty_client_raises)
+A Dirichlet split that leaves a client empty is rejected. ... ok
+test_03_alpha_change_triggers_rebuild (test_audit_fixes.TestPartitionRebuild.test_03_alpha_change_triggers_rebuild)
+Shards built with alpha 0.5 are rebuilt, not reused, when alpha 0.1 is requested. ... ok
+test_04_client_count_change_removes_stale_shards (test_audit_fixes.TestPartitionRebuild.test_04_client_count_change_removes_stale_shards)
+Going from 6 to 4 clients leaves exactly 4 shards. ... ok
 test_01_grid_generation_counts (test_grid_runner.TestGridRunner.test_01_grid_generation_counts)
 Verify grid configurations generate exactly 280 main grid runs and 40 wrong-f runs. ... ok
 test_02_config_hash_determinism (test_grid_runner.TestGridRunner.test_02_config_hash_determinism)
@@ -25,7 +39,7 @@ Verify compute_config_hash yields exact same hash across independent calls. ... 
 test_03_execute_single_run_and_duckdb_persistence (test_grid_runner.TestGridRunner.test_03_execute_single_run_and_duckdb_persistence)
 Smoke test executing a fast 2-round run and verifying DuckDB schema insertion. ... ok
 test_01_quantize_dequantize_bounds (test_quantization_client.TestQuantizationAndClient.test_01_quantize_dequantize_bounds)
-Verify INT8 quantization produces int8 types within [-127, 127] and strictly bounded error. ... ok
+Verify INT8 output is int8 in [-127, 127] and the error stays within S / 2. ... ok
 test_02_all_zeros_and_extreme_inputs (test_quantization_client.TestQuantizationAndClient.test_02_all_zeros_and_extreme_inputs)
 Verify numerical stability on degenerate arrays (zeros, single-element, extreme magnitudes). ... ok
 test_03_payload_bandwidth_savings (test_quantization_client.TestQuantizationAndClient.test_03_payload_bandwidth_savings)
@@ -55,46 +69,58 @@ Verify total training samples across all 20 clients equals 60,000 and test equal
 test_03_feature_dimensionality_and_bounds (test_storage.TestStoragePipeline.test_03_feature_dimensionality_and_bounds)
 Verify features are 784-dimensional float arrays normalized in [0.0, 1.0]. ... ok
 test_04_dirichlet_non_iid_heterogeneity (test_storage.TestStoragePipeline.test_04_dirichlet_non_iid_heterogeneity)
-Statistically verify that class distributions across clients exhibit significant variance (non-IID). ... ok
+Class counts must vary across clients far more than an IID split would give. ... ok
 test_05_telemetry_engine_crud (test_storage.TestStoragePipeline.test_05_telemetry_engine_crud)
 Verify TelemetryEngine creates tables, inserts records, and performs SQL aggregations. ... ok
 test_06_idempotent_pipeline_skips_rebuild (test_storage.TestStoragePipeline.test_06_idempotent_pipeline_skips_rebuild)
 Verify initialize_storage_pipeline recognizes existing shards and skips rebuild. ... ok
 
 ----------------------------------------------------------------------
-Ran 31 tests in 6.555s
+Ran 38 tests in 11.810s
 
 OK
+[!] 4 client shards and test.parquet already exist at C:\Users\Rajch\AppData\Local\Temp\tmp4vmjn2gf\clients_seed_7. Skipping rebuild. Pass force_rebuild=True to overwrite.
+[!] Shards at C:\Users\Rajch\AppData\Local\Temp\tmp4vmjn2gf\clients_seed_7 were built with {'num_clients': 4, 'alpha': 0.5, 'seed': 7}, but {'num_clients': 4, 'alpha': 0.1, 'seed': 7} was requested. Rebuilding.
+[!] Shards at C:\Users\Rajch\AppData\Local\Temp\tmp5nf6s768\clients_seed_7 were built with {'num_clients': 6, 'alpha': 0.5, 'seed': 7}, but {'num_clients': 4, 'alpha': 0.5, 'seed': 7} was requested. Rebuilding.
+[!] Shards at data\clients_seed_0 have no _partition_meta.json; their alpha cannot be checked. Pass force_rebuild=True if they were built with other parameters.
+[!] 20 client shards and test.parquet already exist at data\clients_seed_0. Skipping rebuild. Pass force_rebuild=True to overwrite.
+[!] Shards at data\clients have no _partition_meta.json; their alpha cannot be checked. Pass force_rebuild=True if they were built with other parameters.
+[!] 20 client shards and test.parquet already exist at data\clients. Skipping rebuild. Pass force_rebuild=True to overwrite.
+[!] Shards at data\clients have no _partition_meta.json; their alpha cannot be checked. Pass force_rebuild=True if they were built with other parameters.
+[!] 20 client shards and test.parquet already exist at data\clients. Skipping rebuild. Pass force_rebuild=True to overwrite.
 
 ========================================================
 Starting: Smoke_Test_MultiKrum
 Aggregation: Multi-Krum | Byzantine: 20% | Quantized: True
 ========================================================
-Round 01/01 | Test Acc:  29.45% | Test Loss: 1.8025 | Duration: 0.18s
+Round 01/01 | Test Acc:  29.45% | Test Loss: 1.8025 | Duration: 0.41s
 
 ========================================================
 Starting: Smoke_Test_Gaussian_MultiKrum
 Aggregation: Multi-Krum | Byzantine: 20% | Quantized: False
 ========================================================
-Round 01/01 | Test Acc:  39.94% | Test Loss: 1.7633 | Duration: 0.17s
+Round 01/01 | Test Acc:  39.94% | Test Loss: 1.7633 | Duration: 0.43s
 
 ========================================================
 Starting: Smoke_Test_Coordinate_Median
 Aggregation: Coordinate-Median | Byzantine: 20% | Quantized: False
 ========================================================
-Round 01/01 | Test Acc:  36.90% | Test Loss: 1.9961 | Duration: 0.16s
+Round 01/01 | Test Acc:  36.90% | Test Loss: 1.9961 | Duration: 0.43s
 
 ========================================================
 Starting: Determinism_Run_1
 Aggregation: Multi-Krum | Byzantine: 20% | Quantized: True
 ========================================================
-Round 01/02 | Test Acc:  36.53% | Test Loss: 1.7644 | Duration: 0.17s
-Round 02/02 | Test Acc:  46.05% | Test Loss: 1.2821 | Duration: 0.24s
+Round 01/02 | Test Acc:  36.53% | Test Loss: 1.7644 | Duration: 0.33s
+Round 02/02 | Test Acc:  46.05% | Test Loss: 1.2821 | Duration: 0.40s
 
 ========================================================
 Starting: Determinism_Run_2
 Aggregation: Multi-Krum | Byzantine: 20% | Quantized: True
 ========================================================
-Round 01/02 | Test Acc:  36.53% | Test Loss: 1.7644 | Duration: 0.19s
-Round 02/02 | Test Acc:  46.05% | Test Loss: 1.2821 | Duration: 0.18s
+Round 01/02 | Test Acc:  36.53% | Test Loss: 1.7644 | Duration: 0.39s
+Round 02/02 | Test Acc:  46.05% | Test Loss: 1.2821 | Duration: 0.47s
+[!] Shards at data\clients have no _partition_meta.json; their alpha cannot be checked. Pass force_rebuild=True if they were built with other parameters.
+[!] 20 client shards and test.parquet already exist at data\clients. Skipping rebuild. Pass force_rebuild=True to overwrite.
+[!] Shards at data\clients have no _partition_meta.json; their alpha cannot be checked. Pass force_rebuild=True if they were built with other parameters.
 [!] 20 client shards and test.parquet already exist at data\clients. Skipping rebuild. Pass force_rebuild=True to overwrite.

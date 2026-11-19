@@ -1,4 +1,4 @@
-"""EdgeFed-Bench: Byzantine-Robust Federated Learning Engine with DuckDB-Partitioned Edge Stores and Quantized Gradients.
+"""EdgeFed-Bench engine: storage, clients, attacks, aggregators and INT8 quantization.
 """
 
 __version__ = "0.1.0"

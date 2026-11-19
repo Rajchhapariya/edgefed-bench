@@ -1,9 +1,7 @@
-"""Robust Aggregation Engine for EdgeFed-Bench.
+"""Server aggregation rules for EdgeFed-Bench.
 
-Implements baseline and Byzantine-tolerant server aggregation rules:
-1. FedAvg: Standard weighted mean (vulnerable to Byzantine manipulation).
-2. Coordinate-wise Median: Component-wise median aggregator.
-3. Multi-Krum: Byzantine-resilient aggregation via Euclidean distance scoring.
+FedAvg is the undefended baseline. Coordinate-wise median, coordinate-wise trimmed
+mean and Multi-Krum are the Byzantine-robust defences.
 """
 
 from __future__ import annotations
@@ -14,14 +12,14 @@ import numpy as np
 
 
 class RobustAggregator:
-    """Server-side parameter aggregator comparing baseline and robust strategies."""
+    """FedAvg and the three Byzantine-robust aggregators, as static methods."""
 
     @staticmethod
     def fed_avg(
         updates: List[np.ndarray],
         weights: Optional[List[float]] = None,
     ) -> np.ndarray:
-        """Standard Federated Averaging (FedAvg).
+        """Federated Averaging. Unweighted unless weights are given; the grid passes none.
 
         Mathematical Formulation:
             v_agg = sum_{i=1}^N (w_i * v_i) / sum(w_i)
@@ -48,7 +46,7 @@ class RobustAggregator:
 
     @staticmethod
     def coordinate_median(updates: List[np.ndarray]) -> np.ndarray:
-        """Coordinate-wise Median Aggregator.
+        """Coordinate-wise median.
 
         Mathematical Formulation:
             [v_med]_j = median({ [v_1]_j, [v_2]_j, ..., [v_N]_j })
@@ -72,7 +70,7 @@ class RobustAggregator:
         num_byzantine: Optional[int] = None,
         beta: Optional[float] = None,
     ) -> np.ndarray:
-        """Coordinate-wise Trimmed Mean Aggregator.
+        """Coordinate-wise trimmed mean.
 
         Mathematical Formulation:
             For each coordinate j in {1, ..., D}:
@@ -127,7 +125,7 @@ class RobustAggregator:
         num_byzantine: int,
         m_candidates: Optional[int] = None,
     ) -> Tuple[np.ndarray, List[int], Dict[str, Any]]:
-        """Multi-Krum Byzantine-resilient Aggregator.
+        """Multi-Krum (Blanchard et al., NeurIPS 2017).
 
         Theoretical Foundation (Blanchard et al., NeurIPS 2017):
             Requires 2f + 2 < N, where:
@@ -161,7 +159,7 @@ class RobustAggregator:
             raise ValueError("No updates provided to Multi-Krum.")
 
         f = num_byzantine
-        # Theoretical safety condition (Blanchard et al., NeurIPS 2017)
+        # Krum's guarantee only holds when 2f + 2 < N (Blanchard et al., NeurIPS 2017).
         if 2 * f + 2 >= num_clients:
             raise ValueError(
                 f"Multi-Krum requires 2f + 2 < N to guarantee Byzantine resilience, "
@@ -173,33 +171,29 @@ class RobustAggregator:
         else:
             m = max(1, min(m_candidates, num_clients))
 
-        # Number of closest neighbors to sum over
         num_neighbors = num_clients - f - 2
         if num_neighbors <= 0:
             num_neighbors = 1
 
-        # Cast to float64 to prevent numerical cancellation in high dimensions
+        # float64: the expanded form below subtracts large, nearly equal terms.
         stacked_64 = np.stack(updates, axis=0).astype(np.float64)
 
-        # Vectorized Euclidean squared distance matrix:
+        # Expanded form avoids building an N x N x D difference tensor:
         # ||u - v||^2 = ||u||^2 + ||v||^2 - 2 * <u, v>
         norms_sq = np.sum(stacked_64 ** 2, axis=1, keepdims=True)
         dist_matrix = np.maximum(norms_sq + norms_sq.T - 2.0 * np.dot(stacked_64, stacked_64.T), 0.0)
         np.fill_diagonal(dist_matrix, 0.0)
 
-        # Calculate Krum score for each client
         scores = np.zeros(num_clients, dtype=np.float64)
         for i in range(num_clients):
             other_distances = np.delete(dist_matrix[i], i)
             sorted_distances = np.sort(other_distances)
             scores[i] = np.sum(sorted_distances[:num_neighbors])
 
-        # Multi-Krum: Select m clients with smallest Krum scores
         sorted_client_indices = np.argsort(scores).tolist()
         selected_indices = sorted_client_indices[:m]
         rejected_indices = sorted_client_indices[m:]
 
-        # Compute average of selected candidate updates
         selected_updates = [updates[idx] for idx in selected_indices]
         aggregated_update = np.mean(np.stack(selected_updates, axis=0), axis=0).astype(np.float32)
 

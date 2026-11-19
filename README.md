@@ -1,75 +1,75 @@
 # EdgeFed-Bench: Byzantine-Robust Federated Learning with DuckDB-Partitioned Edge Stores and Quantized Gradients
 
-A reproducible research benchmark evaluating gradient compression trade-offs in Byzantine-tolerant federated learning over columnar edge storage engines.
+A simulated federated learning benchmark. It measures whether INT8 compression of client updates weakens Byzantine-robust aggregation. Client data is stored as Parquet shards and read through DuckDB.
 
 ---
 
-## 1. Problem Formulation & Research Question
+## 1. Problem and Research Question
 
-Federated learning systems deployed on heterogeneous edge devices face two simultaneous bottlenecks:
+Edge clients face two problems at once.
 
-1. **Uplink Bandwidth Bottleneck:** Edge and mobile clients operate over constrained cellular or IoT networks where uplink bandwidth is up to an order of magnitude slower and more metered than central server broadcast downlink (Konečný et al., 2016).
-2. **Adversarial Vulnerability:** Central aggregators using standard Federated Averaging (FedAvg) are vulnerable to Byzantine manipulation, where rogue or malfunctioning nodes transmit arbitrarily poisoned updates that invert or destabilize model convergence (Blanchard et al., NeurIPS 2017).
+1. **Uplink is scarce.** Mobile and IoT clients often send over links that are up to an order of magnitude slower than the server's downlink (Konečný et al., 2016).
+2. **Plain FedAvg trusts every client.** A few faulty or malicious clients can send updates that stop the model from converging (Blanchard et al., NeurIPS 2017).
 
-While uniform gradient quantization reduces transmission volume, it introduces quantization noise into local parameter deltas. This project evaluates:
+Quantizing updates to INT8 helps with the first problem, but it adds rounding error to every update. Byzantine-robust aggregators work by spotting updates that look unlike the others, so that error could in principle hide attackers or make honest clients look like outliers.
 
-> **Does INT8 uniform symmetric gradient quantization degrade the mathematical outlier-detection guarantees and convergence stability of Byzantine-resilient aggregators (Multi-Krum, Coordinate-wise Median) under severe non-IID Dirichlet label skew ($\alpha = 0.5$)?**
+> **Research question:** does INT8 uniform symmetric quantization of client updates reduce the accuracy or the attacker detection of Byzantine-robust aggregators (Multi-Krum, coordinate-wise median, trimmed mean) under moderate non-IID Dirichlet label skew ($\alpha = 0.5$)?
 
 ---
 
 <!-- RESULTS:START -->
 ## 2. Key Findings (generated from the database)
 
-- **Uplink bandwidth:** INT8 cuts the update from 397.5 KB to 99.4 KB per client per round, a 75.0% reduction (388.2 MB to 97.1 MB per 50-round run with 20 clients).
-- **Attacker rejection (Multi-Krum, INT8 and Float32 pooled, mean over seeds for sign-flip):** 100.0% in the worst Gaussian run; between 90.8% and 99.8% under sign-flip, depending on attacker share.
-- **Quantization versus accuracy:** at 20% sign-flip, Multi-Krum reaches 84.90 +- 0.26% with INT8 and 84.89 +- 0.24% with Float32. FedAvg reaches 10.00% at 30% sign-flip.
-- **Defences at 30% sign-flip (INT8):** Multi-Krum 84.75 +- 0.48%, Trimmed Mean 80.37 +- 0.30%, Coordinate Median 80.04 +- 0.30%.
-- **Wrong assumed f (actual f = 6):** Multi-Krum 51.65% at assumed f = 2 and 84.25% at assumed f = 8; Trimmed Mean 17.61% and 80.08%.
+- **Uplink:** INT8 cuts each client update from 397.5 KB to 99.4 KB per round, a 75.0% reduction. A 50-round run with 20 clients sends 97.1 MB instead of 388.2 MB.
+- **Accuracy with INT8:** at 20% sign-flip, Multi-Krum ends at 84.87 +- 0.28% with INT8 and 84.89 +- 0.24% with Float32. Plain FedAvg ends at 10.00% at 30% sign-flip, which is chance level for 10 classes.
+- **Defences at 30% sign-flip (INT8):** Multi-Krum 84.79 +- 0.45%, trimmed mean 80.21 +- 0.40%, coordinate median 79.99 +- 0.47%.
+- **Multi-Krum attacker rejection (INT8 and Float32 pooled):** 100.0% in the worst Gaussian run. Under sign-flip the mean over seeds is between 90.8% and 99.8%, depending on attacker share, so some sign-flip updates are accepted.
+- **Wrong assumed f (actual f = 6):** at assumed f = 2, Multi-Krum ends at 52.12% and trimmed mean at 21.62%. At assumed f = 8 they end at 84.21% and 80.13%.
 
-## 3. Comprehensive Empirical Benchmark Matrix (50 Rounds, 20 Clients, $\alpha = 0.5$, 5 Seeds)
+## 3. Results by Configuration (50 Rounds, 20 Clients, $\alpha = 0.5$, 5 Seeds)
 
-### 3.1. Full Factorial Robustness Comparison (INT8 Wire Precision)
-Values represent final test accuracy (mean $\pm$ std over seeds 0 to 4):
+### 3.1. Final Accuracy by Attack and Aggregator (INT8)
+Final test accuracy, mean $\pm$ standard deviation over seeds 0 to 4:
 
 | Attack | Share | FedAvg | Multi-Krum | Coordinate Median | Trimmed Mean |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | None (Clean) | 0% | 85.30 +- 0.31% | 85.35 +- 0.25% | 84.65 +- 0.44% | 85.36 +- 0.27% |
-| Gaussian | 10% | 48.79 +- 3.51% | 85.30 +- 0.39% | 84.54 +- 0.35% | 85.11 +- 0.40% |
-| Gaussian | 20% | 41.79 +- 6.24% | 85.17 +- 0.32% | 84.64 +- 0.34% | 84.89 +- 0.22% |
-| Gaussian | 30% | 42.81 +- 4.09% | 85.13 +- 0.29% | 84.73 +- 0.50% | 84.87 +- 0.39% |
-| sign-flip | 10% | 78.79 +- 3.58% | 85.28 +- 0.38% | 83.96 +- 0.63% | 84.11 +- 0.65% |
-| sign-flip | 20% | 41.60 +- 29.28% | 84.90 +- 0.26% | 82.97 +- 0.62% | 83.00 +- 0.45% |
-| sign-flip | 30% | 10.00 +- 0.00% | 84.75 +- 0.48% | 80.04 +- 0.30% | 80.37 +- 0.30% |
+| Gaussian | 10% | 48.22 +- 3.36% | 85.30 +- 0.39% | 84.54 +- 0.34% | 85.07 +- 0.40% |
+| Gaussian | 20% | 41.74 +- 5.94% | 85.17 +- 0.32% | 84.57 +- 0.36% | 84.89 +- 0.23% |
+| Gaussian | 30% | 43.00 +- 3.88% | 85.13 +- 0.29% | 84.67 +- 0.53% | 84.85 +- 0.40% |
+| sign-flip | 10% | 78.44 +- 4.01% | 85.28 +- 0.38% | 83.97 +- 0.71% | 84.07 +- 0.63% |
+| sign-flip | 20% | 41.67 +- 27.62% | 84.87 +- 0.28% | 83.03 +- 0.67% | 83.01 +- 0.44% |
+| sign-flip | 30% | 10.00 +- 0.00% | 84.79 +- 0.45% | 79.99 +- 0.47% | 80.21 +- 0.40% |
 
-### 3.2. Precision Trade-off: Float32 vs. INT8 Quantization (20% Sign-Flip Attack)
-Symmetric uniform INT8 quantization cuts uplink by 75.0%. The Float32 to INT8 accuracy difference is smaller than one standard deviation for every aggregator in this table:
+### 3.2. Float32 versus INT8 at 20% Sign-Flip
+INT8 cuts uplink by 75.0%. The Float32 to INT8 accuracy difference is smaller than one standard deviation for every aggregator in this table:
 
 | Aggregator | Float32 Acc | INT8 Acc | Acc Delta | Float32 Uplink (KB) | INT8 Uplink (KB) | Bandwidth Cut |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| FedAvg | 40.51 +- 28.25% | 41.60 +- 29.28% | +1.09% | 397.5 KB | 99.4 KB | -75.0% |
-| Multi-Krum | 84.89 +- 0.24% | 84.90 +- 0.26% | +0.01% | 397.5 KB | 99.4 KB | -75.0% |
-| Coordinate median | 83.21 +- 0.62% | 82.97 +- 0.62% | -0.23% | 397.5 KB | 99.4 KB | -75.0% |
-| Trimmed mean | 82.92 +- 0.55% | 83.00 +- 0.45% | +0.08% | 397.5 KB | 99.4 KB | -75.0% |
+| FedAvg | 40.51 +- 28.25% | 41.67 +- 27.62% | +1.15% | 397.5 KB | 99.4 KB | -75.0% |
+| Multi-Krum | 84.89 +- 0.24% | 84.87 +- 0.28% | -0.02% | 397.5 KB | 99.4 KB | -75.0% |
+| Coordinate median | 83.21 +- 0.62% | 83.03 +- 0.67% | -0.18% | 397.5 KB | 99.4 KB | -75.0% |
+| Trimmed mean | 82.92 +- 0.55% | 83.01 +- 0.44% | +0.09% | 397.5 KB | 99.4 KB | -75.0% |
 
-### 3.3. Learning Dynamics & Attacker Share Scaling
+### 3.3. Convergence and Attacker Share
 
 <p align="center">
   <img src="results/figures/fig1_convergence_20pct_signflip.png" alt="Convergence Trajectory" width="48%" />
   <img src="results/figures/fig2_accuracy_vs_attacker_share.png" alt="Accuracy vs Attacker Share" width="48%" />
 </p>
 
-### 3.4. Server Vulnerability under Misconfigured Assumed $f$ (Actual $f=6$ [30% Attacked], Sign-Flip, INT8)
-When the central coordinator incorrectly estimates the Byzantine fraction, resilience degrades:
+### 3.4. Wrong Assumed $f$ (Actual $f=6$, 30% Attackers, Sign-Flip, INT8)
+The server is told a number of attackers $f$ that differs from the actual 6:
 
-| Assumed f | Assumed Ratio (f/N) | Multi-Krum Final Acc | Trimmed Mean Final Acc | Vulnerability Analysis |
+| Assumed f | Assumed Ratio (f/N) | Multi-Krum Final Acc | Trimmed Mean Final Acc | Setting |
 | :--- | :--- | :--- | :--- | :--- |
-| 2 | 2/20 (10%) | 51.65 +- 9.44% | 17.61 +- 5.09% | Underestimates attackers: poisoned updates leak into aggregation |
-| 4 | 4/20 (20%) | 81.41 +- 3.15% | 77.13 +- 3.03% | Partial underestimation: vulnerable to coordinated shift |
-| 6 | 6/20 (30%) | 84.75 +- 0.48% | 80.37 +- 0.30% | Exact configuration: optimal rejection envelope |
-| 8 | 8/20 (40%) | 84.25 +- 0.90% | 80.08 +- 0.26% | Overestimates attackers: trims honest samples without collapsing |
+| 2 | 2/20 (10%) | 52.12 +- 8.51% | 21.62 +- 14.02% | Underestimates attackers (assumed f < actual f = 6) |
+| 4 | 4/20 (20%) | 81.85 +- 2.21% | 77.09 +- 2.96% | Underestimates attackers (assumed f < actual f = 6) |
+| 6 | 6/20 (30%) | 84.79 +- 0.45% | 80.21 +- 0.40% | Assumed f equals actual f = 6 |
+| 8 | 8/20 (40%) | 84.21 +- 0.92% | 80.13 +- 0.07% | Overestimates attackers (assumed f > actual f = 6) |
 
-### 3.5. Multi-Krum Rejection Dynamics
-Isolation and false-exclusion rates across communication rounds:
+### 3.5. Multi-Krum Rejection Rates
+Attacker rejection and honest false-rejection rates, averaged over all 50 rounds, pooled over INT8 and Float32 (10 runs per cell):
 
 | Attack Vector | Attacker Share | Attacker Rejection Rate (%) | Honest False-Rejection Rate (%) |
 | :--- | :--- | :--- | :--- |
@@ -87,8 +87,7 @@ Isolation and false-exclusion rates across communication rounds:
 ```
 edgefed-bench/
 ├── requirements.txt
-├── simulate.py                   # Single-run orchestrator and telemetry logger (early regimes)
-├── verify_storage.py             # Standalone storage validation script
+├── simulate.py                   # Quick 4-regime check with telemetry logging
 ├── data/                         # Parquet client shards, test split, telemetry (generated)
 ├── engine/
 │   ├── storage.py                # Dirichlet partitioner, Snappy Parquet I/O, DuckDB EdgeStore
@@ -105,21 +104,21 @@ edgefed-bench/
 └── tests/                        # Storage, quantization, attacks and aggregators, simulation, grid runner
 ```
 
-### Why DuckDB + Apache Parquet for Edge Simulation?
+### Why Parquet and DuckDB
 
-Traditional federated learning simulators store client partitions in a monolithic Python dictionary or raw PyTorch tensors, leading to high memory pressure and slow sequential iterations. EdgeFed-Bench shards non-IID partitions into individual compressed Apache Parquet files (`client_00.parquet` to `client_19.parquet`) and queries them through an in-memory DuckDB engine. By using DuckDB's `.fetchnumpy()`, label vectors and multidimensional feature arrays are extracted directly from columnar memory into NumPy buffers without Python-level row deserialization, achieving sub-second access across 60,000 samples.
+Each client's partition is a separate Snappy-compressed Parquet file (`client_00.parquet` to `client_19.parquet`), one directory per seed. This keeps a partition fixed on disk once it is built, so every run with the same seed trains on exactly the same data. `EdgeStore` reads a shard with DuckDB's `.fetchnumpy()`, which returns NumPy arrays without converting row by row in Python. We have not benchmarked read time.
 
-### Analytical Telemetry
+### Telemetry
 
-Client-side training telemetry (gradient norms, transmission payloads, local losses) and server-side evaluation metrics (global accuracy, test loss, mitigation status, execution time) are committed into a local DuckDB analytical database (`data/telemetry.duckdb`) using structured SQL tables (`round_telemetry` and `global_eval`).
+`simulate.py` writes per-client telemetry (update norm, payload size, local loss) to the `round_telemetry` table and per-round evaluation (accuracy, loss, aggregator, attacker fraction, duration) to the `global_eval` table, both in `data/telemetry.duckdb`. Its summary table also prints a Multi-Krum mitigation rate: the share of rounds in which no attacker was selected. That rate is not stored. It shows as n/a for aggregators that do not select clients. Grid results are stored separately in `results/results.duckdb`.
 
 ---
 
-## 5. Mathematical Formulations
+## 5. Methods
 
 ### 5.1. INT8 Uniform Symmetric Quantization
 
-Given a continuous parameter delta vector $\mathbf{x} \in \mathbb{R}^D$:
+Each client update $\mathbf{x} \in \mathbb{R}^D$ uses one scale for the whole vector. Rounding is to the nearest integer, so it is deterministic:
 
 $$\alpha = \max_{i} |x_i|, \quad S = \frac{\alpha}{127}$$
 
@@ -127,36 +126,35 @@ $$q_i = \text{clip}\left(\left\lfloor \frac{x_i}{S} \right\rceil, -127, 127\righ
 
 $$\hat{x}_i = q_i \cdot S \in \mathbb{R}_{\text{float32}}$$
 
-Element-wise reconstruction error is bounded by:
+The error on each element is at most half a step:
 $$|x_i - \hat{x}_i| \le \frac{S}{2} = \frac{\alpha}{254}$$
 
-### 5.2. Multi-Krum Robust Aggregation
+### 5.2. Multi-Krum
 
-For $N$ client updates $\{\mathbf{v}_1, \dots, \mathbf{v}_N\}$ with up to $f$ Byzantine adversaries ($2f + 2 < N$):
+For $N$ client updates $\{\mathbf{v}_1, \dots, \mathbf{v}_N\}$ and an assumed number of attackers $f$ with $2f + 2 < N$:
 
-1. Compute pairwise squared Euclidean distance matrix in 64-bit precision:
+1. Compute all pairwise squared Euclidean distances in 64-bit floats:
    $$d_{ij}^2 = \|\mathbf{v}_i - \mathbf{v}_j\|_2^2 = \|\mathbf{v}_i\|_2^2 + \|\mathbf{v}_j\|_2^2 - 2 \langle \mathbf{v}_i, \mathbf{v}_j \rangle$$
-2. For each client $i$, compute its Krum score by summing distances to its $N - f - 2$ closest neighbors:
+2. Score each client $i$ by the sum of distances to its $N - f - 2$ nearest neighbours:
    $$s(i) = \sum_{k=1}^{N - f - 2} d_{i, (k)}^2$$
-3. Select the $m = N - f$ candidates with the smallest Krum scores and compute their average:
+3. Average the $m = N - f$ updates with the lowest scores:
    $$\mathbf{v}_{\text{agg}} = \frac{1}{m} \sum_{i \in \text{Selected}} \mathbf{v}_i$$
 
 ---
 
-## 6. System Limitations
+## 6. Limitations
 
-To maintain academic rigor and transparent reproducibility, the experimental boundaries of this benchmark are explicitly outlined:
-
-1. **Single-Machine Simulation:** All experiments execute on a single physical host utilizing virtualized local processes rather than distributed edge hardware (such as Raspberry Pi or NVIDIA Jetson clusters). As a result, asynchronous network jitter, packet drops, and thermal throttling on physical edge devices are not modeled.
-2. **Model and Task Complexity:** Benchmarks are conducted using a compact Multi-Layer Perceptron (101,770 parameters) on Fashion-MNIST under Dirichlet non-IID label skew ($\alpha = 0.5$). Deep convolutional networks (e.g., ResNet) or Vision Transformers over higher-dimensional feature spaces may introduce different gradient sparsity and noise dynamics.
-3. **Server Oracle Knowledge:** In the main 280-run factorial grid, the central aggregator is configured with the exact attacker count $f$. The impact of misconfigured or unknown Byzantine fractions is analyzed separately in the dedicated wrong-$f$ benchmark (Section 3.4).
-4. **Absence of Differential Privacy:** The benchmark evaluates Byzantine-resilient aggregation and uniform gradient quantization in isolation without Differential Privacy (DP) mechanisms (such as gradient clipping or Laplacian/Gaussian noise injection), which may interact with INT8 quantization error bounds.
+1. **One machine.** All clients run as a simulation on one computer, not on edge hardware such as a Raspberry Pi or Jetson. Network delay, packet loss and thermal throttling are not modelled.
+2. **One small model on one dataset.** We train a multi-layer perceptron with 101,770 parameters on Fashion-MNIST with Dirichlet label skew ($\alpha = 0.5$) only. Convolutional networks or transformers may produce updates with different sparsity and noise.
+3. **Five seeds.** Each result is the mean and standard deviation over seeds 0 to 4. We ran no significance tests. The grid runs 50 rounds; `simulate.py` defaults to 5 rounds and is meant only as a quick check.
+4. **The server knows f.** In the 280-run grid the aggregator is given the true number of attackers. Section 3.4 covers what happens when it is given the wrong number.
+5. **No differential privacy.** We did not add clipping or noise for differential privacy. That noise may interact with the INT8 rounding error.
 
 ---
 
-## 7. Reproduction & Execution
+## 7. Reproducing the Results
 
-### 7.1. Environment Setup
+### 7.1. Setup
 
 ```bash
 git clone https://github.com/Rajchhapariya/edgefed-bench.git
@@ -164,33 +162,33 @@ cd edgefed-bench
 pip install -r requirements.txt
 ```
 
-### 7.2. Run Automated Test Suite
+`requirements.txt` pins the exact versions used for the stored results.
+
+### 7.2. Tests
 
 ```bash
 python -m unittest discover tests -v
 ```
 
-The suite covers Parquet storage, Dirichlet partitioning, INT8 bounds, attacks, the four aggregators, the simulation loop and the grid runner.
+The tests cover Parquet storage and partitioning, INT8 error bounds, both attacks, all four aggregators, the simulation loop and the grid runner. Some tests build shards under `data/` and download Fashion-MNIST the first time.
 
-### 7.3. Execute Benchmark Simulation
+### 7.3. Running the Grid
 
-Run the full grid (280 robustness runs plus 40 wrong-f runs). Each finished run is stored under a config hash in `results/results.duckdb`, so an interrupted run resumes where it stopped:
+The full grid is 280 runs plus 40 wrong-f runs. Each finished run is stored under a config hash in `results/results.duckdb`, so a stopped grid resumes where it left off. Runs are bit-for-bit repeatable on the same machine at the same PyTorch thread count (see `results/ENVIRONMENT.md`). The stored results used 10 threads; pass `--threads 10` to match them.
 
 ```bash
 python experiments/run_grid.py --dry_run          # list configs without running
-python experiments/run_grid.py --experiment all
+python experiments/run_grid.py --experiment all --threads 10
 python experiments/make_report_assets.py          # rewrites the results block above, figures and report data
 ```
 
-`simulate.py` runs a single configuration for quick checks:
+`simulate.py` runs four short regimes (clean FedAvg, attacked FedAvg, Multi-Krum in Float32 and in INT8) as a quick check. Its numbers are not the grid results:
 
 ```bash
 python simulate.py --rounds 5 --clients 20 --alpha 0.5
 ```
 
-### 7.4. Inspect Results
-
-Query stored experiment metrics directly via DuckDB CLI or Python:
+### 7.4. Querying the Results
 
 ```python
 import duckdb

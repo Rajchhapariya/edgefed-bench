@@ -1,8 +1,7 @@
-"""Byzantine Adversary Engine for EdgeFed-Bench.
+"""Byzantine attacks used in EdgeFed-Bench.
 
-Implements realistic adversarial attack vectors in federated learning:
-1. Sign-Flip Attack: Inverts the direction of gradient descent to cause divergence.
-2. Gaussian Noise Injection: Injects high-variance zero-mean stochastic disturbance.
+Sign-flip sends a scaled, negated honest update. Gaussian sends zero-mean noise
+that ignores the honest update entirely.
 """
 
 from __future__ import annotations
@@ -11,13 +10,15 @@ from typing import List, Tuple
 
 import numpy as np
 
+from engine.quantization import Int8Quantizer
+
 
 class ByzantineAdversary:
-    """Simulates rogue edge nodes executing Byzantine attack vectors."""
+    """Turns the updates of selected clients into attacker updates."""
 
     @staticmethod
     def select_byzantine_clients(num_clients: int, num_byzantine: int, seed: int = 42) -> List[int]:
-        """Deterministically selects Byzantine client IDs using the seed.
+        """Picks which clients are Byzantine. The same seed always picks the same clients.
 
         Args:
             num_clients: Total number of clients N.
@@ -42,7 +43,7 @@ class ByzantineAdversary:
         Mathematical Formulation:
             v_byz = -scaling_factor * v_honest
             
-        Negates the update direction to pull the global model away from optimal minima.
+        The attacker pushes the model against the direction honest clients move it.
 
         Args:
             update: Honest parameter update vector.
@@ -61,12 +62,12 @@ class ByzantineAdversary:
         std: float = 5.0,
         seed: int | None = None,
     ) -> np.ndarray:
-        """Executes a Gaussian variance explosion attack.
+        """Returns a Gaussian noise vector in place of an honest update.
 
         Mathematical Formulation:
             v_byz ~ Normal(mean, std^2 * I)
             
-        Injects uncorrelated high-magnitude noise to disrupt parameter stability.
+        The noise does not depend on the honest update.
 
         Args:
             shape_reference: Baseline array whose .shape determines output dimensions.
@@ -90,8 +91,9 @@ class ByzantineAdversary:
         scaling_factor: float = 2.5,
         noise_std: float = 5.0,
         seed: int = 42,
+        wire_int8: bool = False,
     ) -> Tuple[List[np.ndarray], List[int]]:
-        """Applies Byzantine corruption to designated client update vectors.
+        """Replaces the updates of the given Byzantine clients with attacker updates.
 
         Args:
             updates: List of client update vectors (ordered 0 to N-1).
@@ -100,6 +102,8 @@ class ByzantineAdversary:
             scaling_factor: Multiplier for sign flip.
             noise_std: Standard deviation for Gaussian noise.
             seed: Seed for stochastic attacks.
+            wire_int8: If True, attacker updates are quantized to INT8 and reconstructed,
+                because the server can only decode values that fit the INT8 wire format.
 
         Returns:
             Tuple of:
@@ -121,6 +125,8 @@ class ByzantineAdversary:
                     )
                 else:
                     raise ValueError(f"Unknown attack type: {attack_type}")
+                if wire_int8:
+                    poisoned = Int8Quantizer.dequantize(*Int8Quantizer.quantize(poisoned))
                 poisoned_list.append(poisoned)
             else:
                 poisoned_list.append(update.copy())

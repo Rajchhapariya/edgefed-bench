@@ -1,13 +1,11 @@
-"""Config-Driven Experiment Grid Runner for EdgeFed-Bench v2.
+"""Runs the experiment grid defined in experiments/config.yaml.
 
-Executes the full factorial experimental grid:
-1. 280-run robustness grid across aggregators, attacks, attacker shares, precisions, and seeds.
-2. Wrong-f sensitivity experiment across assumed f in {2, 4, 6, 8}.
+The main grid is 280 runs over aggregators, attacks, attacker shares, precisions and
+seeds. The wrong-f experiment adds 40 runs with assumed f in {2, 4, 6, 8}.
 
-Persists results into DuckDB:
-- `runs`: Summary metrics, final accuracies, bandwidth, convergence rounds.
-- `round_metrics`: Round-by-round trajectory for learning curve visualization.
-Supports resume functionality via deterministic config hashes.
+Results go to DuckDB: `runs` holds one summary row per run, `round_metrics` one row
+per round. Each run is keyed by a hash of its config, so a stopped grid resumes
+without redoing finished runs.
 """
 
 from __future__ import annotations
@@ -27,13 +25,17 @@ import numpy as np
 import torch
 import yaml
 
-# Add project root to sys.path
+# Lets the script import engine/ when run as experiments/run_grid.py.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from engine.adversary import ByzantineAdversary
 from engine.aggregator import RobustAggregator
 from engine.client import EdgeClassifier, EdgeClient
 from engine.storage import EdgeStore, initialize_storage_pipeline
+
+
+# Training hyperparameters of the committed results (experiments/config.yaml).
+LEGACY_TRAINING_DEFAULTS = {"lr": 0.05, "batch_size": 128, "momentum": 0.9}
 
 
 def compute_config_hash(run_config: Dict[str, Any]) -> str:
@@ -52,12 +54,19 @@ def compute_config_hash(run_config: Dict[str, Any]) -> str:
         "dirichlet_alpha",
     ]
     canonical_dict = {k: run_config.get(k) for k in canonical_keys}
+    # Hyperparameters enter the hash only when they differ from the stored grid's
+    # values. Old hashes stay valid, and a run with a new lr, batch size or momentum
+    # is never mistaken for a finished one.
+    for key, legacy_value in LEGACY_TRAINING_DEFAULTS.items():
+        value = run_config.get(key, legacy_value)
+        if value != legacy_value:
+            canonical_dict[key] = value
     raw_str = json.dumps(canonical_dict, sort_keys=True)
     return hashlib.sha256(raw_str.encode("utf-8")).hexdigest()[:16]
 
 
 def init_database(db_path: Path) -> duckdb.DuckDBPyConnection:
-    """Initializes DuckDB tables with strict schema definitions."""
+    """Creates the runs and round_metrics tables if they do not exist."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(db_path))
 
@@ -113,7 +122,7 @@ def evaluate_global_model_tensor(
     y_test_tensor: torch.Tensor,
     batch_size: int = 512,
 ) -> Tuple[float, float]:
-    """Optimized evaluation function utilizing pre-allocated torch tensors."""
+    """Returns (accuracy %, mean loss) on test tensors built once per grid."""
     model.eval()
     criterion = torch.nn.CrossEntropyLoss()
     total_samples = len(y_test_tensor)
@@ -154,19 +163,16 @@ def execute_single_run(
     lr = run_config["lr"]
     quantize = (precision == "INT8")
 
-    # Multi-Krum theoretical condition: 2f + 2 < N
     if aggregator == "Multi-Krum" and assumed_f > 0:
         assert 2 * assumed_f + 2 < num_clients, (
             f"Multi-Krum condition 2f + 2 < N violated: 2*{assumed_f} + 2 >= {num_clients}"
         )
 
-    # Deterministic model initialization
     torch.manual_seed(seed)
     np.random.seed(seed)
     global_model = EdgeClassifier()
     current_weights = global_model.get_flat_parameters()
 
-    # Pre-instantiate clients for this run
     clients = [
         EdgeClient(
             client_id=i,
@@ -174,11 +180,11 @@ def execute_single_run(
             lr=lr,
             batch_size=batch_size,
             local_epochs=1,
+            momentum=run_config.get("momentum", 0.9),
         )
         for i in range(num_clients)
     ]
 
-    # Select Byzantine attackers deterministically
     byzantine_ids = (
         ByzantineAdversary.select_byzantine_clients(num_clients, actual_f, seed=seed)
         if actual_f > 0
@@ -201,7 +207,6 @@ def execute_single_run(
         client_updates = []
         round_bytes = 0
 
-        # Edge client training
         for client in clients:
             upd = client.train_round(
                 current_weights,
@@ -215,7 +220,6 @@ def execute_single_run(
         total_uplink_bytes += round_bytes
         raw_vectors = [u.update for u in client_updates]
 
-        # Adversarial corruption
         if actual_f > 0:
             attack_type_clean = "sign_flip" if attack == "sign-flip" else "gaussian"
             corrupted_vectors, _ = ByzantineAdversary.corrupt_client_updates(
@@ -224,11 +228,11 @@ def execute_single_run(
                 attack_type=attack_type_clean,
                 scaling_factor=2.5,
                 seed=(seed * 10_000) + (round_num * 100),
+                wire_int8=quantize,
             )
         else:
             corrupted_vectors = raw_vectors
 
-        # Server-side robust aggregation
         round_att_rej: Optional[int] = None
         round_hon_rej: Optional[int] = None
 
@@ -257,11 +261,9 @@ def execute_single_run(
         else:
             raise ValueError(f"Unknown aggregator: {aggregator}")
 
-        # Update global parameters
         current_weights = current_weights + aggregated_vector
         global_model.set_flat_parameters(current_weights)
 
-        # Global test set evaluation
         acc, test_loss = evaluate_global_model_tensor(
             global_model,
             x_test_tensor,
@@ -284,7 +286,6 @@ def execute_single_run(
 
     wall_clock_sec = time.time() - start_wall_clock
 
-    # Calculate convergence and summary metrics
     acc_10 = history_accuracy[9] if len(history_accuracy) >= 10 else None
     acc_25 = history_accuracy[24] if len(history_accuracy) >= 25 else None
     acc_50 = history_accuracy[49] if len(history_accuracy) >= 50 else None
@@ -428,7 +429,17 @@ def main():
         action="store_true",
         help="Inspect combinations and config hashes without executing simulation.",
     )
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=None,
+        help="PyTorch CPU threads. Results repeat bit for bit only at the same thread count; "
+        "the stored results used 10 (default: PyTorch's own choice).",
+    )
     args = parser.parse_args()
+    if args.threads:
+        torch.set_num_threads(args.threads)
+    print(f"PyTorch threads: {torch.get_num_threads()}")
 
     config_path = Path(args.config)
     db_path = Path(args.db_path)
@@ -459,23 +470,31 @@ def main():
 
     con = init_database(db_path)
 
-    # Fetch existing completed config hashes for resumption
     existing_hashes = set(row[0] for row in con.execute("SELECT config_hash FROM runs").fetchall())
     print(f"Already completed in database: {len(existing_hashes)} runs.")
 
-    # Pre-generate Dirichlet shards for all 5 seeds once to avoid disk churn
-    unique_seeds = sorted(list(set(r["seed"] for r in runs_to_process)))
+    # Shards live in one directory per seed, so every run with a given seed must use
+    # the same client count and alpha.
+    partition_by_seed: Dict[int, Tuple[int, float]] = {}
+    for r in runs_to_process:
+        params = (r["num_clients"], r["dirichlet_alpha"])
+        if partition_by_seed.setdefault(r["seed"], params) != params:
+            raise ValueError(
+                f"Seed {r['seed']} is used with different (num_clients, alpha) values: "
+                f"{partition_by_seed[r['seed']]} and {params}. Use one partition per seed."
+            )
+    unique_seeds = sorted(partition_by_seed)
     print(f"Ensuring Dirichlet partitions exist for seeds: {unique_seeds}...")
     for s in unique_seeds:
+        n_clients, alpha = partition_by_seed[s]
         initialize_storage_pipeline(
             data_root="data",
-            num_clients=20,
-            alpha=0.5,
+            num_clients=n_clients,
+            alpha=alpha,
             seed=s,
             force_rebuild=False,
         )
 
-    # Cache stores and test data
     stores_by_seed = {s: EdgeStore(data_root="data", seed=s) for s in unique_seeds}
     x_test_raw, y_test_raw = stores_by_seed[unique_seeds[0]].get_test_data()
     x_test_tensor = torch.from_numpy(x_test_raw).float()
@@ -510,7 +529,6 @@ def main():
             y_test_tensor=y_test_tensor,
         )
 
-        # Batch insert into DuckDB
         con.execute("""
             INSERT INTO runs VALUES (
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?

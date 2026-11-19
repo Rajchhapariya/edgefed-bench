@@ -8,7 +8,7 @@ This document details the exact host environment, hardware profile, system softw
 
 - **Host Processor (CPU):** 13th Gen Intel(R) Core(TM) i7-13620H (10 physical cores, 16 logical threads, base clock 2.40 GHz, boost up to 4.90 GHz)
 - **Host Memory (RAM):** 16.00 GB DDR5
-- **Accelerator (GPU):** None used. All experiments execute strictly on CPU to guarantee bit-level determinism and cross-platform numerical reproducibility.
+- **Accelerator (GPU):** None used. All experiments execute on CPU. Runs are bit-for-bit repeatable on this machine at a fixed PyTorch thread count (default here: 10 threads, `torch.get_num_threads()`). A different thread count changes the floating-point summation order and the results slightly (for example 85.23% at 10 threads and 85.21% at 2 threads for Multi-Krum, 20% sign-flip, INT8, seed 0). Reproducibility on other CPUs or operating systems has not been tested.
 - **Operating System:** Microsoft Windows 11 Home Single Language (Version 10.0.26300, Build 26300)
 - **Architecture:** x86_64
 
@@ -18,6 +18,7 @@ This document details the exact host environment, hardware profile, system softw
 
 - **Python Runtime:** Python 3.11.9 (`C:\Users\Rajch\AppData\Local\Programs\Python\Python311\python.exe`)
 - **PyTorch:** 2.14.0 (CPU build)
+- **torchvision:** 0.29.1
 - **DuckDB:** 1.5.6
 - **PyArrow:** 26.0.0
 - **NumPy:** 2.4.6
@@ -35,5 +36,9 @@ A single-run benchmark profile consisting of 50 communication rounds across 20 e
 - **Mean Duration per Communication Round:** 0.973 seconds/round
 - **Total Configurations in Benchmark Grid:** 280 runs (40 clean runs + 240 attacked runs across 5 seeds)
 - **Projected Total Grid Wall-Clock Time:** 13,619.2 seconds (approximately 3.78 hours)
+- **Wrong-f Experiment:** 40 further runs (not included in the projection above).
+- **Measured Wall-Clock Time (from `wall_clock_sec` in `results/results.duckdb`):** 4.594 hours summed over the 280-run grid and 1.183 hours over the 40 wrong-f runs.
+  The 160 INT8 attacked runs (120 grid, 40 wrong-f) were rerun on 2026-11-19 after attacker updates were made valid INT8 payloads. They ran four processes at a time at 10 threads each, so their per-run times are inflated by CPU sharing. The other 160 runs were not rerun; they take 1.363 hours in total.
+- **Thread Count:** all stored runs used 10 PyTorch threads. `experiments/run_grid.py --threads 10` reproduces them.
 - **Decision on Round Count:** Because the projected duration of 3.78 hours is substantially below the 24-hour threshold, the full protocol of **50 rounds** is retained without reduction.
 

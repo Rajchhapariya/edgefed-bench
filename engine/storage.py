@@ -1,14 +1,13 @@
-"""EdgeFed-Bench Storage Engine.
+"""Data partitioning, Parquet shards and DuckDB access.
 
-Data Engineering Layer responsible for:
-1. Dirichlet-skewed non-IID partitioning of real benchmark datasets.
-2. Direct disk-sharded persistence to Apache Parquet format.
-3. Fast analytical query execution and data fetching via DuckDB.
-4. Persistent round-by-round experiment telemetry logging into an analytical DuckDB table.
+Fashion-MNIST is split across clients with a Dirichlet distribution and written to one
+Parquet file per client. EdgeStore reads shards through DuckDB. TelemetryEngine logs
+per-round telemetry from simulate.py.
 """
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -19,9 +18,12 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from torchvision import datasets, transforms
 
+# File written next to the client shards that records how they were partitioned.
+PARTITION_META_FILENAME = "_partition_meta.json"
+
 
 class DataPartitioner:
-    """Handles dataset loading, Dirichlet non-IID partitioning, and Parquet serialization."""
+    """Loads Fashion-MNIST, splits it across clients and writes the Parquet shards."""
 
     def __init__(self, data_root: str = "data"):
         self.data_root = Path(data_root)
@@ -59,7 +61,6 @@ class DataPartitioner:
             transform=transform,
         )
 
-        # Convert to flat numpy float32 arrays
         x_train = train_ds.data.numpy().reshape(-1, 784).astype(np.float32) / 255.0
         y_train = train_ds.targets.numpy().astype(np.int64)
 
@@ -87,9 +88,9 @@ class DataPartitioner:
         Args:
             labels: Array of integer class labels.
             num_clients: Number of simulated edge clients (default: 20).
-            alpha: Concentration parameter. Lower values (e.g. 0.5) produce severe non-IID
-                   skew. As alpha -> infinity, partitioning approaches uniform IID.
-            seed: Deterministic random seed for scientific reproducibility.
+            alpha: Concentration parameter. Lower values give more label skew; as alpha grows
+                   the split approaches IID.
+            seed: Random seed; the same seed gives the same split.
 
         Returns:
             Dictionary mapping client_id (0 to num_clients - 1) to an array of assigned sample indices.
@@ -102,17 +103,21 @@ class DataPartitioner:
             idx_c = np.where(labels == c)[0]
             rng.shuffle(idx_c)
 
-            # Sample Dirichlet proportions for class c
             proportions = rng.dirichlet(np.repeat(alpha, num_clients))
 
-            # Discretize proportions into integer sample counts
             splits = (np.cumsum(proportions) * len(idx_c)).astype(int)[:-1]
             client_splits = np.split(idx_c, splits)
 
             for client_id, split in enumerate(client_splits):
                 client_indices[client_id].extend(split.tolist())
 
-        # Shuffle indices per client and convert to numpy array
+        empty = [cid for cid, idx in client_indices.items() if len(idx) == 0]
+        if empty:
+            raise ValueError(
+                f"Dirichlet split left clients {empty} with no samples (alpha={alpha}, seed={seed}). "
+                f"Use another seed or a larger alpha."
+            )
+
         final_partitions = {}
         for client_id, indices in client_indices.items():
             arr_indices = np.array(indices, dtype=np.int64)
@@ -147,7 +152,6 @@ class DataPartitioner:
         target_dir.mkdir(parents=True, exist_ok=True)
         generated_paths = []
 
-        # Export individual client partition shards
         for client_id, indices in client_partitions.items():
             client_features = x_train[indices]
             client_labels = y_train[indices]
@@ -167,7 +171,6 @@ class DataPartitioner:
             pq.write_table(table, str(out_path), compression="snappy")
             generated_paths.append(str(out_path.resolve()))
 
-        # Export global test set partition
         test_table = pa.Table.from_arrays(
             [
                 pa.array(range(len(y_test)), type=pa.int64()),
@@ -182,7 +185,7 @@ class DataPartitioner:
 
 
 class EdgeStore:
-    """DuckDB-backed query interface for edge nodes and server evaluation."""
+    """Reads client shards and the test set through DuckDB."""
 
     def __init__(
         self,
@@ -229,7 +232,7 @@ class EdgeStore:
         return features, labels
 
     def get_client_class_distribution(self, client_id: int) -> Dict[int, int]:
-        """Executes analytical aggregation over client Parquet partition.
+        """Counts samples per class in one client's shard.
 
         Args:
             client_id: Integer identifier of the client.
@@ -260,7 +263,7 @@ class EdgeStore:
 
 
 class TelemetryEngine:
-    """Analytical telemetry manager storing round metrics into DuckDB."""
+    """Writes simulate.py telemetry to DuckDB."""
 
     def __init__(self, db_path: str = "data/telemetry.duckdb"):
         self.db_path = Path(db_path)
@@ -366,7 +369,7 @@ class TelemetryEngine:
         )
 
     def get_regime_summary(self, experiment_id: str) -> List[Dict[str, Any]]:
-        """Queries highest accuracy, final loss, and total transmitted bandwidth per regime."""
+        """Returns peak accuracy, final loss and total payload per regime."""
         query = """
             SELECT 
                 regime_name,
@@ -396,7 +399,7 @@ def initialize_storage_pipeline(
     force_rebuild: bool = False,
     clients_dir: Optional[Union[str, Path]] = None,
 ) -> Tuple[List[str], Dict[str, Any]]:
-    """Convenience bootstrap function to load, partition, and persist shards.
+    """Builds the client shards for one seed, or reuses them if they match.
 
     Args:
         data_root: Root directory for storing Parquet partitions and database.
@@ -420,6 +423,29 @@ def initialize_storage_pipeline(
     test_parquet_path = Path(data_root) / "test.parquet"
     expected_shards = [target_clients_dir / f"client_{i:02d}.parquet" for i in range(num_clients)]
     shards_exist = all(p.exists() for p in expected_shards) and test_parquet_path.exists()
+
+    # Without this record, shards built with another alpha would be reused silently.
+    meta_path = target_clients_dir / PARTITION_META_FILENAME
+    requested_meta = {"num_clients": int(num_clients), "alpha": float(alpha), "seed": int(seed)}
+    if shards_exist and not force_rebuild:
+        if meta_path.exists():
+            with open(meta_path, "r", encoding="utf-8") as fh:
+                stored_meta = json.load(fh)
+            if stored_meta != requested_meta:
+                print(
+                    f"[!] Shards at {target_clients_dir} were built with {stored_meta}, "
+                    f"but {requested_meta} was requested. Rebuilding."
+                )
+                force_rebuild = True
+        else:
+            print(
+                f"[!] Shards at {target_clients_dir} have no {PARTITION_META_FILENAME}; their alpha "
+                f"cannot be checked. Pass force_rebuild=True if they were built with other parameters."
+            )
+
+    if force_rebuild:
+        for old_shard in target_clients_dir.glob("client_*.parquet"):
+            old_shard.unlink()
 
     if shards_exist and not force_rebuild:
         print(
@@ -450,6 +476,8 @@ def initialize_storage_pipeline(
         client_partitions=partitions,
         clients_dir=target_clients_dir,
     )
+    with open(meta_path, "w", encoding="utf-8") as fh:
+        json.dump(requested_meta, fh, indent=2)
 
     telemetry = TelemetryEngine(db_path=os.path.join(data_root, "telemetry.duckdb"))
     telemetry.close()

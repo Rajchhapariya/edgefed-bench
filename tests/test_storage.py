@@ -17,8 +17,7 @@ class TestStoragePipeline(unittest.TestCase):
         cls.clients_dir = Path(cls.data_root) / "clients"
         cls.test_parquet = Path(cls.data_root) / "test.parquet"
         cls.telemetry_db = Path(cls.data_root) / "telemetry.duckdb"
-        if not cls.test_parquet.exists() or not cls.clients_dir.exists():
-            initialize_storage_pipeline(data_root=cls.data_root, num_clients=20, alpha=0.5)
+        initialize_storage_pipeline(data_root=cls.data_root, num_clients=20, alpha=0.5)
         cls.store = EdgeStore(data_root=cls.data_root)
 
     @classmethod
@@ -58,7 +57,7 @@ class TestStoragePipeline(unittest.TestCase):
         self.assertTrue(np.all(labels >= 0) and np.all(labels < 10), "Invalid class label found.")
 
     def test_04_dirichlet_non_iid_heterogeneity(self):
-        """Statistically verify that class distributions across clients exhibit significant variance (non-IID)."""
+        """Class counts must vary across clients far more than an IID split would give."""
         client_class_matrix = np.zeros((20, 10), dtype=np.int64)
         for cid in range(20):
             dist = self.store.get_client_class_distribution(cid)
