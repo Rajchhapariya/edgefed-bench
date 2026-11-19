@@ -20,6 +20,33 @@ from torchvision import datasets, transforms
 
 # File written next to the client shards that records how they were partitioned.
 PARTITION_META_FILENAME = "_partition_meta.json"
+VALIDATION_FILENAME = "val.parquet"
+DEFAULT_SEED = 42
+
+# Offset for the validation-split generator, so the split does not reuse the
+# partition's random stream.
+_VALIDATION_SEED_OFFSET = 7919
+
+
+def client_shard_dir(
+    data_root: Union[str, Path],
+    seed: int = DEFAULT_SEED,
+    alpha: float = 0.5,
+    num_clients: int = 20,
+    validation_size: int = 0,
+) -> Path:
+    """Directory that holds the shards for one partition.
+
+    The main setting (alpha 0.5, 20 clients, no validation split) keeps the short name
+    clients_seed_{seed} used by the stored results. Any other setting gets its own
+    directory, so partitions with different parameters never overwrite each other.
+    """
+    name = f"clients_seed_{seed}"
+    if float(alpha) != 0.5 or int(num_clients) != 20:
+        name += f"_a{float(alpha):g}_n{int(num_clients)}"
+    if int(validation_size) > 0:
+        name += f"_val{int(validation_size)}"
+    return Path(data_root) / name
 
 
 class DataPartitioner:
@@ -28,11 +55,10 @@ class DataPartitioner:
     def __init__(self, data_root: str = "data"):
         self.data_root = Path(data_root)
         self.cache_dir = self.data_root / "cache"
-        self.clients_dir = self.data_root / "clients"
+        self.clients_dir = client_shard_dir(self.data_root)
         self.test_parquet_path = self.data_root / "test.parquet"
 
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.clients_dir.mkdir(parents=True, exist_ok=True)
 
     def load_fashion_mnist(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Loads Fashion-MNIST dataset from cache or downloads it.
@@ -192,14 +218,21 @@ class EdgeStore:
         data_root: str = "data",
         seed: Optional[int] = None,
         clients_dir: Optional[Union[str, Path]] = None,
+        alpha: float = 0.5,
+        num_clients: int = 20,
+        validation_size: int = 0,
     ):
         self.data_root = Path(data_root)
         if clients_dir is not None:
             self.clients_dir = Path(clients_dir)
-        elif seed is not None and seed != 42:
-            self.clients_dir = self.data_root / f"clients_seed_{seed}"
         else:
-            self.clients_dir = self.data_root / "clients"
+            self.clients_dir = client_shard_dir(
+                self.data_root,
+                seed=DEFAULT_SEED if seed is None else seed,
+                alpha=alpha,
+                num_clients=num_clients,
+                validation_size=validation_size,
+            )
         self.test_parquet_path = self.data_root / "test.parquet"
         self.con = duckdb.connect()
 
@@ -249,6 +282,16 @@ class EdgeStore:
         """
         result = self.con.execute(query).fetchall()
         return {row[0]: row[1] for row in result}
+
+    def get_validation_data(self) -> Tuple[np.ndarray, np.ndarray]:
+        """Returns the held-out validation split stored with these shards."""
+        path = self.clients_dir / VALIDATION_FILENAME
+        if not path.exists():
+            raise FileNotFoundError(
+                f"No validation split at {path}. Build the shards with validation_size > 0."
+            )
+        result = self.con.execute(f"SELECT label, features FROM '{path.as_posix()}'").fetchnumpy()
+        return np.stack(result["features"]).astype(np.float32), result["label"].astype(np.int64)
 
     def get_test_data(self) -> Tuple[np.ndarray, np.ndarray]:
         """Fetches global test dataset via DuckDB."""
@@ -395,9 +438,10 @@ def initialize_storage_pipeline(
     data_root: str = "data",
     num_clients: int = 20,
     alpha: float = 0.5,
-    seed: int = 42,
+    seed: int = DEFAULT_SEED,
     force_rebuild: bool = False,
     clients_dir: Optional[Union[str, Path]] = None,
+    validation_size: int = 0,
 ) -> Tuple[List[str], Dict[str, Any]]:
     """Builds the client shards for one seed, or reuses them if they match.
 
@@ -407,17 +451,17 @@ def initialize_storage_pipeline(
         alpha: Dirichlet concentration parameter for non-IID label skew.
         seed: Random seed for partition reproducibility.
         force_rebuild: If True, regenerates and overwrites existing Parquet shards.
-        clients_dir: Optional custom path for client shards (defaults to clients or clients_seed_{seed}).
+        clients_dir: Optional custom path for client shards (default: client_shard_dir()).
+        validation_size: Training samples held out as a validation set before partitioning.
+            They are drawn uniformly at random and stored as val.parquet next to the shards.
 
     Returns:
         Tuple of (list of parquet file paths, summary dictionary).
     """
     if clients_dir is not None:
         target_clients_dir = Path(clients_dir)
-    elif seed != 42:
-        target_clients_dir = Path(data_root) / f"clients_seed_{seed}"
     else:
-        target_clients_dir = Path(data_root) / "clients"
+        target_clients_dir = client_shard_dir(data_root, seed, alpha, num_clients, validation_size)
 
     target_clients_dir.mkdir(parents=True, exist_ok=True)
     test_parquet_path = Path(data_root) / "test.parquet"
@@ -427,6 +471,8 @@ def initialize_storage_pipeline(
     # Without this record, shards built with another alpha would be reused silently.
     meta_path = target_clients_dir / PARTITION_META_FILENAME
     requested_meta = {"num_clients": int(num_clients), "alpha": float(alpha), "seed": int(seed)}
+    if validation_size:
+        requested_meta["validation_size"] = int(validation_size)
     if shards_exist and not force_rebuild:
         if meta_path.exists():
             with open(meta_path, "r", encoding="utf-8") as fh:
@@ -462,12 +508,30 @@ def initialize_storage_pipeline(
 
     partitioner = DataPartitioner(data_root=data_root)
     x_train, y_train, x_test, y_test = partitioner.load_fashion_mnist()
-    partitions = partitioner.partition_dirichlet(
-        labels=y_train,
+
+    train_pool = np.arange(len(y_train))
+    if validation_size:
+        val_rng = np.random.default_rng(seed + _VALIDATION_SEED_OFFSET)
+        val_idx = np.sort(val_rng.choice(len(y_train), size=int(validation_size), replace=False))
+        train_pool = np.setdiff1d(train_pool, val_idx)
+        val_table = pa.Table.from_arrays(
+            [
+                pa.array(val_idx, type=pa.int64()),
+                pa.array(y_train[val_idx], type=pa.int64()),
+                pa.array(x_train[val_idx].tolist(), type=pa.list_(pa.float32())),
+            ],
+            names=["sample_id", "label", "features"],
+        )
+        pq.write_table(val_table, str(target_clients_dir / VALIDATION_FILENAME), compression="snappy")
+
+    # Partition positions within the training pool, then map back to dataset indices.
+    local = partitioner.partition_dirichlet(
+        labels=y_train[train_pool],
         num_clients=num_clients,
         alpha=alpha,
         seed=seed,
     )
+    partitions = {cid: train_pool[idx] for cid, idx in local.items()}
     paths = partitioner.export_to_parquet(
         x_train=x_train,
         y_train=y_train,

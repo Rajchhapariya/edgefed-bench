@@ -1,9 +1,23 @@
-# Report Notes: Why the Report Does Not Import the Shared Template
+# Report Notes: Report Layout
 
-The build specification asks the report to reuse the shared template at `C:\Users\Rajch\Desktop\Research\templates\report_template.typ`. `report/edgefed_bench_v2.typ` instead carries its own copy of the template's styling and components (`stat-card`, `callout`, header banner, headers and footers). There are three reasons.
+## Version 2.1: standard paper layout
 
-1. **Typst cannot import it.** Typst 0.15 does not let a document read files outside the project root. Compiling with `typst compile report/edgefed_bench_v2.typ report/edgefed_bench_v2.pdf` and an `#import "../../../templates/report_template.typ"` fails with `path would escape the project root`. A copy inside the repository also means the report compiles on any machine that has the repository.
+`report/edgefed_bench_v2.typ` now uses a plain research-paper layout instead of the shared template's dashboard style. The stat cards, coloured callouts and dark title banner are gone. In their place:
 
-2. **The template's spacing pushes the report to five pages.** The template uses 1.6 cm vertical and 1.8 cm horizontal margins, 9.5 pt text and 0.58 em leading. With four tables, two figures and the five required sections, that layout runs onto a fifth page. The report uses 1.4 cm top and bottom margins, 1.6 cm side margins and 8.8 pt text, which fits in four pages.
+- A centred title, author line, abstract and keywords.
+- New Computer Modern at 10 pt, justified paragraphs, A4 with 2.3 cm side margins.
+- Numbered sections and cross-references (for example "Section 3.3", "Table 5").
+- Numbered table captions above each table and figure captions below each figure.
+- Tables with horizontal rules only (top, under the header, bottom) and no shading.
+- Figures without in-figure titles and with serif labels; the caption carries the description.
+- Author-year citations with an alphabetical reference list, and the reproduction steps in an appendix.
 
-3. **Numbers come from generated files.** Every number in the report prose, stat cards and callouts is read from `report/metrics.typ`, and every table from `report/tables.typ`. Both are written by `experiments/make_report_assets.py` from `results/results.duckdb`, so no number is typed by hand.
+The report is 12 pages. The first version was 4 pages; version 2.1 adds the statistics, the mechanism measurements and six extended studies.
+
+## Why the report does not import the shared template
+
+The build specification asks the report to reuse the shared template at `C:\Users\Rajch\Desktop\Research\templates\report_template.typ`. Typst 0.15 does not let a document read files outside the project root: an `#import "../../../templates/report_template.typ"` fails with `path would escape the project root`. Keeping the styling inside the repository also means the report compiles on any machine that has the repository.
+
+## Numbers come from generated files
+
+Every number in the report prose is read from `report/metrics.typ`, and every table from `report/tables.typ`. Both are written by `experiments/make_report_assets.py` from `results/results.duckdb`, so no number is typed by hand.

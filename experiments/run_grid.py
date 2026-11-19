@@ -1,11 +1,20 @@
-"""Runs the experiment grid defined in experiments/config.yaml.
+"""Runs the experiments defined in experiments/config.yaml.
 
-The main grid is 280 runs over aggregators, attacks, attacker shares, precisions and
-seeds. The wrong-f experiment adds 40 runs with assumed f in {2, 4, 6, 8}.
+Experiment types (the `experiment_type` column in the results):
+- grid: 4 aggregators x 2 attacks x 3 attacker shares x 2 precisions x seeds, plus clean runs.
+- wrong_f: the server is told the wrong number of attackers.
+- strong_attacks: ALIE and IPM, attacks built to stay close to honest updates.
+- alpha_sweep: other Dirichlet alpha values.
+- bit_width: INT4 and 1-bit sign updates.
+- cnn: a small CNN instead of the MLP.
+- long_run: 150 rounds instead of 50.
+- tuning: learning rate, momentum and batch size scored on a held-out validation split.
 
-Results go to DuckDB: `runs` holds one summary row per run, `round_metrics` one row
-per round. Each run is keyed by a hash of its config, so a stopped grid resumes
-without redoing finished runs.
+Results go to DuckDB. `runs` holds one summary row per run, `round_metrics` one row per
+round, and `round_mechanism` the per-round distances used to explain the results. Each
+run is keyed by a hash of its config, so a stopped job resumes without redoing finished
+runs. `--shard k/K` runs every K-th pending run, so several processes can work in
+parallel; each must write to its own database file (see experiments/merge_results.py).
 """
 
 from __future__ import annotations
@@ -30,12 +39,38 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from engine.adversary import ByzantineAdversary
 from engine.aggregator import RobustAggregator
-from engine.client import EdgeClassifier, EdgeClient
+from engine.client import EdgeClient, build_model
 from engine.storage import EdgeStore, initialize_storage_pipeline
 
 
-# Training hyperparameters of the committed results (experiments/config.yaml).
-LEGACY_TRAINING_DEFAULTS = {"lr": 0.05, "batch_size": 128, "momentum": 0.9}
+# Settings of the committed grid. A key enters the hash only when a run uses a
+# different value, so every stored hash stays valid.
+LEGACY_DEFAULTS = {
+    "lr": 0.05,
+    "batch_size": 128,
+    "momentum": 0.9,
+    "model": "mlp",
+    "validation_size": 0,
+    "eval_split": "test",
+}
+# Kept for code that imported the old name.
+LEGACY_TRAINING_DEFAULTS = {k: LEGACY_DEFAULTS[k] for k in ("lr", "batch_size", "momentum")}
+
+ATTACK_NAMES = {"sign-flip": "sign_flip", "Gaussian": "gaussian", "ALIE": "alie", "IPM": "ipm"}
+
+EXPERIMENT_TYPES = (
+    "grid", "wrong_f", "strong_attacks", "alpha_sweep", "bit_width", "cnn", "long_run", "tuning",
+)
+
+RUN_COLUMNS = [
+    "config_hash", "experiment_type", "aggregator", "attack", "attacker_share", "actual_f",
+    "assumed_f", "wire_precision", "seed", "num_rounds", "num_clients", "final_accuracy",
+    "best_accuracy", "final_loss", "acc_round_10", "acc_round_25", "acc_round_50",
+    "rounds_to_70", "total_uplink_bytes", "bytes_per_client_round", "wall_clock_sec",
+    "attacker_rejection_rate", "honest_false_rejection_rate", "completed_at",
+    "dirichlet_alpha", "model", "lr", "momentum", "batch_size", "validation_size",
+    "eval_split", "torch_threads",
+]
 
 
 def compute_config_hash(run_config: Dict[str, Any]) -> str:
@@ -54,10 +89,7 @@ def compute_config_hash(run_config: Dict[str, Any]) -> str:
         "dirichlet_alpha",
     ]
     canonical_dict = {k: run_config.get(k) for k in canonical_keys}
-    # Hyperparameters enter the hash only when they differ from the stored grid's
-    # values. Old hashes stay valid, and a run with a new lr, batch size or momentum
-    # is never mistaken for a finished one.
-    for key, legacy_value in LEGACY_TRAINING_DEFAULTS.items():
+    for key, legacy_value in LEGACY_DEFAULTS.items():
         value = run_config.get(key, legacy_value)
         if value != legacy_value:
             canonical_dict[key] = value
@@ -66,7 +98,7 @@ def compute_config_hash(run_config: Dict[str, Any]) -> str:
 
 
 def init_database(db_path: Path) -> duckdb.DuckDBPyConnection:
-    """Creates the runs and round_metrics tables if they do not exist."""
+    """Creates the result tables, and adds columns that older databases lack."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(db_path))
 
@@ -98,6 +130,18 @@ def init_database(db_path: Path) -> duckdb.DuckDBPyConnection:
         completed_at TIMESTAMP
     );
     """)
+    # Columns added after the first grid. Rows written before them all used these values.
+    for column, sql_type, default in (
+        ("dirichlet_alpha", "DOUBLE", "0.5"),
+        ("model", "VARCHAR", "'mlp'"),
+        ("lr", "DOUBLE", "0.05"),
+        ("momentum", "DOUBLE", "0.9"),
+        ("batch_size", "INTEGER", "128"),
+        ("validation_size", "INTEGER", "0"),
+        ("eval_split", "VARCHAR", "'test'"),
+        ("torch_threads", "INTEGER", "10"),
+    ):
+        con.execute(f"ALTER TABLE runs ADD COLUMN IF NOT EXISTS {column} {sql_type} DEFAULT {default}")
 
     con.execute("""
     CREATE TABLE IF NOT EXISTS round_metrics (
@@ -113,16 +157,29 @@ def init_database(db_path: Path) -> duckdb.DuckDBPyConnection:
     );
     """)
 
+    con.execute("""
+    CREATE TABLE IF NOT EXISTS round_mechanism (
+        config_hash VARCHAR,
+        round_num INTEGER,
+        honest_pair_dist DOUBLE,
+        honest_attacker_dist DOUBLE,
+        honest_codec_error DOUBLE,
+        honest_update_norm DOUBLE,
+        attacker_update_norm DOUBLE,
+        PRIMARY KEY (config_hash, round_num)
+    );
+    """)
+
     return con
 
 
 def evaluate_global_model_tensor(
-    model: EdgeClassifier,
+    model: torch.nn.Module,
     x_test_tensor: torch.Tensor,
     y_test_tensor: torch.Tensor,
     batch_size: int = 512,
 ) -> Tuple[float, float]:
-    """Returns (accuracy %, mean loss) on test tensors built once per grid."""
+    """Returns (accuracy %, mean loss) on evaluation tensors built once per process."""
     model.eval()
     criterion = torch.nn.CrossEntropyLoss()
     total_samples = len(y_test_tensor)
@@ -144,13 +201,48 @@ def evaluate_global_model_tensor(
     return accuracy, avg_loss
 
 
+def mechanism_metrics(
+    vectors: List[np.ndarray],
+    byzantine_ids: List[int],
+    codec_errors: List[Optional[float]],
+) -> Dict[str, Optional[float]]:
+    """Distances that show whether compression error could hide attackers.
+
+    honest_pair_dist: mean L2 distance between two honest updates.
+    honest_attacker_dist: mean L2 distance between an honest and an attacker update.
+    honest_codec_error: mean L2 norm of the compression error of honest updates
+        (0 for Float32).
+    """
+    v = np.stack([np.asarray(x, dtype=np.float64) for x in vectors])
+    sq = np.einsum("ij,ij->i", v, v)
+    dist = np.sqrt(np.maximum(sq[:, None] + sq[None, :] - 2.0 * (v @ v.T), 0.0))
+    norms = np.sqrt(sq)
+    byz = set(byzantine_ids)
+    honest = [i for i in range(len(vectors)) if i not in byz]
+    attackers = sorted(byz)
+
+    pairs = [dist[i, j] for a, i in enumerate(honest) for j in honest[a + 1:]]
+    cross = [dist[i, j] for i in honest for j in attackers]
+    errs = [codec_errors[i] or 0.0 for i in honest]
+    return {
+        "honest_pair_dist": float(np.mean(pairs)) if pairs else None,
+        "honest_attacker_dist": float(np.mean(cross)) if cross else None,
+        "honest_codec_error": float(np.mean(errs)) if errs else None,
+        "honest_update_norm": float(np.mean(norms[honest])) if honest else None,
+        "attacker_update_norm": float(np.mean(norms[attackers])) if attackers else None,
+    }
+
+
 def execute_single_run(
     run_config: Dict[str, Any],
     store: EdgeStore,
     x_test_tensor: torch.Tensor,
     y_test_tensor: torch.Tensor,
 ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
-    """Executes a single federated learning run and returns run-level and round-level metrics."""
+    """Executes a single federated learning run and returns run-level and round-level metrics.
+
+    Each round record also carries a "mechanism" entry (None for runs without attackers).
+    """
     aggregator = run_config["aggregator"]
     attack = run_config["attack"]
     actual_f = run_config["actual_f"]
@@ -161,7 +253,7 @@ def execute_single_run(
     num_clients = run_config["num_clients"]
     batch_size = run_config["batch_size"]
     lr = run_config["lr"]
-    quantize = (precision == "INT8")
+    model_name = run_config.get("model", "mlp")
 
     if aggregator == "Multi-Krum" and assumed_f > 0:
         assert 2 * assumed_f + 2 < num_clients, (
@@ -170,7 +262,7 @@ def execute_single_run(
 
     torch.manual_seed(seed)
     np.random.seed(seed)
-    global_model = EdgeClassifier()
+    global_model = build_model(model_name)
     current_weights = global_model.get_flat_parameters()
 
     clients = [
@@ -181,6 +273,7 @@ def execute_single_run(
             batch_size=batch_size,
             local_epochs=1,
             momentum=run_config.get("momentum", 0.9),
+            model_name=model_name,
         )
         for i in range(num_clients)
     ]
@@ -210,9 +303,9 @@ def execute_single_run(
         for client in clients:
             upd = client.train_round(
                 current_weights,
-                quantize=quantize,
                 round_num=round_num,
                 seed=seed,
+                precision=precision,
             )
             client_updates.append(upd)
             round_bytes += upd.payload_bytes
@@ -221,17 +314,22 @@ def execute_single_run(
         raw_vectors = [u.update for u in client_updates]
 
         if actual_f > 0:
-            attack_type_clean = "sign_flip" if attack == "sign-flip" else "gaussian"
             corrupted_vectors, _ = ByzantineAdversary.corrupt_client_updates(
                 raw_vectors,
                 byzantine_client_ids=byzantine_ids,
-                attack_type=attack_type_clean,
+                attack_type=ATTACK_NAMES[attack],
                 scaling_factor=2.5,
                 seed=(seed * 10_000) + (round_num * 100),
-                wire_int8=quantize,
+                wire_precision=precision,
+            )
+            mechanism = mechanism_metrics(
+                corrupted_vectors,
+                byzantine_ids,
+                [u.noise_metrics["l2_error"] if u.noise_metrics else None for u in client_updates],
             )
         else:
             corrupted_vectors = raw_vectors
+            mechanism = None
 
         round_att_rej: Optional[int] = None
         round_hon_rej: Optional[int] = None
@@ -282,6 +380,7 @@ def execute_single_run(
             "round_uplink_bytes": round_bytes,
             "attacker_rejections": round_att_rej,
             "honest_rejections": round_hon_rej,
+            "mechanism": mechanism,
         })
 
     wall_clock_sec = time.time() - start_wall_clock
@@ -322,6 +421,50 @@ def execute_single_run(
     return run_summary, round_records
 
 
+def _base_run(cfg: Dict[str, Any], **overrides: Any) -> Dict[str, Any]:
+    run = {
+        "num_rounds": cfg["num_rounds"],
+        "num_clients": cfg["num_clients"],
+        "dirichlet_alpha": cfg["dirichlet_alpha"],
+        "batch_size": cfg["batch_size"],
+        "lr": cfg["lr"],
+        "momentum": cfg["momentum"],
+    }
+    run.update(overrides)
+    return run
+
+
+def _scenario_runs(
+    experiment_type: str,
+    cfg: Dict[str, Any],
+    aggregators: List[str],
+    scenarios: List[List[Any]],
+    precisions: List[str],
+    seeds: List[int],
+    **overrides: Any,
+) -> List[Dict[str, Any]]:
+    """One run per aggregator x (attack, share) x precision x seed."""
+    runs = []
+    for agg in aggregators:
+        for attack, share in scenarios:
+            f = int(round(cfg["num_clients"] * share))
+            for prec in precisions:
+                for seed in seeds:
+                    runs.append(_base_run(
+                        cfg,
+                        experiment_type=experiment_type,
+                        aggregator=agg,
+                        attack=attack,
+                        attacker_share=float(share),
+                        actual_f=f,
+                        assumed_f=f,
+                        wire_precision=prec,
+                        seed=seed,
+                        **overrides,
+                    ))
+    return runs
+
+
 def generate_grid_configurations(config_path: Path) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Generates lists of all parameter combinations for main grid and wrong-f experiment."""
     with open(config_path, "r", encoding="utf-8") as f:
@@ -335,47 +478,36 @@ def generate_grid_configurations(config_path: Path) -> Tuple[List[Dict[str, Any]
     for agg in grid_cfg["aggregators"]:
         for prec in grid_cfg["precisions"]:
             for seed in grid_cfg["seeds"]:
-                grid_runs.append({
-                    "experiment_type": "grid",
-                    "aggregator": agg,
-                    "attack": "none",
-                    "attacker_share": 0.0,
-                    "actual_f": 0,
-                    "assumed_f": 0,
-                    "wire_precision": prec,
-                    "seed": seed,
-                    "num_rounds": grid_cfg["num_rounds"],
-                    "num_clients": grid_cfg["num_clients"],
-                    "dirichlet_alpha": grid_cfg["dirichlet_alpha"],
-                    "batch_size": grid_cfg["batch_size"],
-                    "lr": grid_cfg["lr"],
-                    "momentum": grid_cfg["momentum"],
-                })
+                grid_runs.append(_base_run(
+                    grid_cfg,
+                    experiment_type="grid",
+                    aggregator=agg,
+                    attack="none",
+                    attacker_share=0.0,
+                    actual_f=0,
+                    assumed_f=0,
+                    wire_precision=prec,
+                    seed=seed,
+                ))
 
     # Attacked runs: sign-flip and Gaussian across attacker shares (10%, 20%, 30%)
     for agg in grid_cfg["aggregators"]:
         for attack in ["sign-flip", "Gaussian"]:
             for share in grid_cfg["attacker_shares"]:
                 actual_f = int(round(grid_cfg["num_clients"] * share))
-                assumed_f = actual_f
                 for prec in grid_cfg["precisions"]:
                     for seed in grid_cfg["seeds"]:
-                        grid_runs.append({
-                            "experiment_type": "grid",
-                            "aggregator": agg,
-                            "attack": attack,
-                            "attacker_share": share,
-                            "actual_f": actual_f,
-                            "assumed_f": assumed_f,
-                            "wire_precision": prec,
-                            "seed": seed,
-                            "num_rounds": grid_cfg["num_rounds"],
-                            "num_clients": grid_cfg["num_clients"],
-                            "dirichlet_alpha": grid_cfg["dirichlet_alpha"],
-                            "batch_size": grid_cfg["batch_size"],
-                            "lr": grid_cfg["lr"],
-                            "momentum": grid_cfg["momentum"],
-                        })
+                        grid_runs.append(_base_run(
+                            grid_cfg,
+                            experiment_type="grid",
+                            aggregator=agg,
+                            attack=attack,
+                            attacker_share=share,
+                            actual_f=actual_f,
+                            assumed_f=actual_f,
+                            wire_precision=prec,
+                            seed=seed,
+                        ))
 
     # Wrong-f experiment configurations (Spec 2.5)
     wf_cfg = cfg["wrong_f_experiment"]
@@ -383,28 +515,130 @@ def generate_grid_configurations(config_path: Path) -> Tuple[List[Dict[str, Any]
     for agg in wf_cfg["aggregators"]:
         for assumed_f in wf_cfg["assumed_f_values"]:
             for seed in wf_cfg["seeds"]:
-                wrong_f_runs.append({
-                    "experiment_type": "wrong_f",
-                    "aggregator": agg,
-                    "attack": wf_cfg["attack"],
-                    "attacker_share": float(wf_cfg["actual_f"]) / wf_cfg["num_clients"],
-                    "actual_f": wf_cfg["actual_f"],
-                    "assumed_f": assumed_f,
-                    "wire_precision": wf_cfg["precision"],
-                    "seed": seed,
-                    "num_rounds": wf_cfg["num_rounds"],
-                    "num_clients": wf_cfg["num_clients"],
-                    "dirichlet_alpha": wf_cfg["dirichlet_alpha"],
-                    "batch_size": wf_cfg["batch_size"],
-                    "lr": wf_cfg["lr"],
-                    "momentum": wf_cfg["momentum"],
-                })
+                wrong_f_runs.append(_base_run(
+                    wf_cfg,
+                    experiment_type="wrong_f",
+                    aggregator=agg,
+                    attack=wf_cfg["attack"],
+                    attacker_share=float(wf_cfg["actual_f"]) / wf_cfg["num_clients"],
+                    actual_f=wf_cfg["actual_f"],
+                    assumed_f=assumed_f,
+                    wire_precision=wf_cfg["precision"],
+                    seed=seed,
+                ))
 
     return grid_runs, wrong_f_runs
 
 
+def generate_extension_configurations(config_path: Path) -> Dict[str, List[Dict[str, Any]]]:
+    """Run lists for the experiments added after the main grid, keyed by experiment type."""
+    with open(config_path, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    ext = cfg.get("extensions")
+    if not ext:
+        return {}
+    base = ext["common"]
+    seeds = base["seeds"]
+    out: Dict[str, List[Dict[str, Any]]] = {}
+
+    sa = ext["strong_attacks"]
+    out["strong_attacks"] = _scenario_runs(
+        "strong_attacks", base, sa["aggregators"],
+        [[a, s] for a in sa["attacks"] for s in sa["attacker_shares"]],
+        sa["precisions"], seeds,
+    )
+
+    al = ext["alpha_sweep"]
+    out["alpha_sweep"] = []
+    for alpha in al["alphas"]:
+        out["alpha_sweep"] += _scenario_runs(
+            "alpha_sweep", dict(base, dirichlet_alpha=alpha), al["aggregators"],
+            al["scenarios"], al["precisions"], seeds,
+        )
+
+    bw = ext["bit_width"]
+    out["bit_width"] = _scenario_runs(
+        "bit_width", base, bw["aggregators"], bw["scenarios"], bw["precisions"], seeds,
+    )
+
+    cn = ext["cnn"]
+    out["cnn"] = _scenario_runs(
+        "cnn", dict(base, num_rounds=cn.get("num_rounds", base["num_rounds"])), cn["aggregators"],
+        cn["scenarios"], cn["precisions"], cn.get("seeds", seeds), model="cnn",
+    )
+
+    lr_cfg = ext["long_run"]
+    out["long_run"] = _scenario_runs(
+        "long_run", dict(base, num_rounds=lr_cfg["num_rounds"]), lr_cfg["aggregators"],
+        lr_cfg["scenarios"], lr_cfg["precisions"], seeds,
+    )
+
+    tu = ext["tuning"]
+    out["tuning"] = []
+    for lr in tu["lrs"]:
+        for momentum in tu["momenta"]:
+            for bs in tu["batch_sizes"]:
+                out["tuning"] += _scenario_runs(
+                    "tuning", dict(base, lr=lr, momentum=momentum, batch_size=bs),
+                    [tu["aggregator"]], [["none", 0.0]], [tu["precision"]], tu["seeds"],
+                    validation_size=tu["validation_size"], eval_split="val",
+                )
+    return out
+
+
+def all_configurations(config_path: Path) -> Dict[str, List[Dict[str, Any]]]:
+    grid, wrong_f = generate_grid_configurations(config_path)
+    out = {"grid": grid, "wrong_f": wrong_f}
+    out.update(generate_extension_configurations(config_path))
+    return out
+
+
+def partition_key(run: Dict[str, Any]) -> Tuple[int, float, int, int]:
+    return (run["seed"], float(run["dirichlet_alpha"]), run["num_clients"], run.get("validation_size", 0))
+
+
+def insert_run(con: duckdb.DuckDBPyConnection, chash: str, run_cfg: Dict[str, Any],
+               summary: Dict[str, Any], round_records: List[Dict[str, Any]]) -> None:
+    """Writes one finished run to runs, round_metrics and round_mechanism."""
+    values = {
+        "config_hash": chash,
+        **{k: run_cfg[k] for k in ("experiment_type", "aggregator", "attack", "attacker_share",
+                                    "actual_f", "assumed_f", "wire_precision", "seed",
+                                    "num_rounds", "num_clients")},
+        **{k: summary[k] for k in ("final_accuracy", "best_accuracy", "final_loss", "acc_round_10",
+                                    "acc_round_25", "acc_round_50", "rounds_to_70",
+                                    "total_uplink_bytes", "bytes_per_client_round", "wall_clock_sec",
+                                    "attacker_rejection_rate", "honest_false_rejection_rate",
+                                    "completed_at")},
+        "dirichlet_alpha": run_cfg["dirichlet_alpha"],
+        "model": run_cfg.get("model", "mlp"),
+        "lr": run_cfg["lr"],
+        "momentum": run_cfg["momentum"],
+        "batch_size": run_cfg["batch_size"],
+        "validation_size": run_cfg.get("validation_size", 0),
+        "eval_split": run_cfg.get("eval_split", "test"),
+        "torch_threads": torch.get_num_threads(),
+    }
+    con.execute(
+        f"INSERT INTO runs ({', '.join(RUN_COLUMNS)}) VALUES ({', '.join(['?'] * len(RUN_COLUMNS))})",
+        [values[c] for c in RUN_COLUMNS],
+    )
+    con.executemany("INSERT INTO round_metrics VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [
+        (chash, rr["round_num"], rr["test_accuracy"], rr["test_loss"], rr["round_duration_sec"],
+         rr["round_uplink_bytes"], rr["attacker_rejections"], rr["honest_rejections"])
+        for rr in round_records
+    ])
+    mech = [
+        (chash, rr["round_num"], m["honest_pair_dist"], m["honest_attacker_dist"],
+         m["honest_codec_error"], m["honest_update_norm"], m["attacker_update_norm"])
+        for rr in round_records if (m := rr.get("mechanism"))
+    ]
+    if mech:
+        con.executemany("INSERT INTO round_mechanism VALUES (?, ?, ?, ?, ?, ?, ?)", mech)
+
+
 def main():
-    parser = argparse.ArgumentParser(description="EdgeFed-Bench v2 Grid Runner")
+    parser = argparse.ArgumentParser(description="EdgeFed-Bench experiment runner")
     parser.add_argument(
         "--config",
         type=str,
@@ -421,8 +655,8 @@ def main():
         "--experiment",
         type=str,
         default="all",
-        choices=["all", "grid", "wrong_f"],
-        help="Which experiment subset to run: 'all', 'grid', or 'wrong_f' (default: all)",
+        help="Comma-separated experiment types, or 'all' (main grid and wrong-f only) or "
+        "'everything'. Types: " + ", ".join(EXPERIMENT_TYPES),
     )
     parser.add_argument(
         "--dry_run",
@@ -433,8 +667,20 @@ def main():
         "--threads",
         type=int,
         default=None,
-        help="PyTorch CPU threads. Results repeat bit for bit only at the same thread count; "
-        "the stored results used 10 (default: PyTorch's own choice).",
+        help="PyTorch CPU threads. Results repeat bit for bit only at the same thread count. "
+        "The thread count of each run is stored in the torch_threads column.",
+    )
+    parser.add_argument(
+        "--shard",
+        type=str,
+        default="0/1",
+        help="k/K: run only every K-th pending run, starting at k. Use a separate --db_path per shard.",
+    )
+    parser.add_argument(
+        "--skip_db",
+        type=str,
+        default=None,
+        help="Optional second database whose finished runs are skipped (for example the main results file).",
     )
     args = parser.parse_args()
     if args.threads:
@@ -443,21 +689,27 @@ def main():
 
     config_path = Path(args.config)
     db_path = Path(args.db_path)
+    shard_k, shard_n = (int(x) for x in args.shard.split("/"))
 
-    grid_runs, wrong_f_runs = generate_grid_configurations(config_path)
+    configs = all_configurations(config_path)
+    if args.experiment == "all":
+        selected = ["grid", "wrong_f"]
+    elif args.experiment == "everything":
+        selected = list(configs)
+    else:
+        selected = [s.strip() for s in args.experiment.split(",")]
+    unknown = [s for s in selected if s not in configs]
+    if unknown:
+        raise ValueError(f"Unknown experiment types: {unknown}. Known: {sorted(configs)}")
 
-    runs_to_process = []
-    if args.experiment in ("all", "grid"):
-        runs_to_process.extend(grid_runs)
-    if args.experiment in ("all", "wrong_f"):
-        runs_to_process.extend(wrong_f_runs)
+    runs_to_process = [r for s in selected for r in configs[s]]
 
     print("==================================================================")
-    print("EdgeFed-Bench v2: Config-Driven Experiment Grid Runner")
+    print("EdgeFed-Bench experiment runner")
     print("==================================================================")
+    for s in selected:
+        print(f"  - {s}: {len(configs[s])} runs")
     print(f"Total planned configurations: {len(runs_to_process)}")
-    print(f"  - Main Grid: {len(grid_runs)} runs (40 clean + 240 attacked)")
-    print(f"  - Wrong-f Experiment: {len(wrong_f_runs)} runs")
     print(f"Target Database: {db_path}")
 
     if args.dry_run:
@@ -469,112 +721,62 @@ def main():
         return
 
     con = init_database(db_path)
-
     existing_hashes = set(row[0] for row in con.execute("SELECT config_hash FROM runs").fetchall())
-    print(f"Already completed in database: {len(existing_hashes)} runs.")
+    if args.skip_db:
+        with duckdb.connect(args.skip_db, read_only=True) as other:
+            existing_hashes |= {row[0] for row in other.execute("SELECT config_hash FROM runs").fetchall()}
+    print(f"Already completed: {len(existing_hashes)} runs.")
 
-    # Shards live in one directory per seed, so every run with a given seed must use
-    # the same client count and alpha.
-    partition_by_seed: Dict[int, Tuple[int, float]] = {}
-    for r in runs_to_process:
-        params = (r["num_clients"], r["dirichlet_alpha"])
-        if partition_by_seed.setdefault(r["seed"], params) != params:
-            raise ValueError(
-                f"Seed {r['seed']} is used with different (num_clients, alpha) values: "
-                f"{partition_by_seed[r['seed']]} and {params}. Use one partition per seed."
+    pending = [r for r in runs_to_process if compute_config_hash(r) not in existing_hashes]
+    pending = [r for i, r in enumerate(pending) if i % shard_n == shard_k]
+    print(f"This process runs {len(pending)} of them (shard {shard_k}/{shard_n}).")
+
+    stores: Dict[Tuple[int, float, int, int], EdgeStore] = {}
+    eval_tensors: Dict[Any, Tuple[torch.Tensor, torch.Tensor]] = {}
+
+    def store_for(run: Dict[str, Any]) -> EdgeStore:
+        key = partition_key(run)
+        if key not in stores:
+            seed, alpha, n_clients, val_size = key
+            initialize_storage_pipeline(
+                data_root="data", num_clients=n_clients, alpha=alpha, seed=seed,
+                validation_size=val_size,
             )
-    unique_seeds = sorted(partition_by_seed)
-    print(f"Ensuring Dirichlet partitions exist for seeds: {unique_seeds}...")
-    for s in unique_seeds:
-        n_clients, alpha = partition_by_seed[s]
-        initialize_storage_pipeline(
-            data_root="data",
-            num_clients=n_clients,
-            alpha=alpha,
-            seed=s,
-            force_rebuild=False,
-        )
+            stores[key] = EdgeStore(data_root="data", seed=seed, alpha=alpha,
+                                    num_clients=n_clients, validation_size=val_size)
+        return stores[key]
 
-    stores_by_seed = {s: EdgeStore(data_root="data", seed=s) for s in unique_seeds}
-    x_test_raw, y_test_raw = stores_by_seed[unique_seeds[0]].get_test_data()
-    x_test_tensor = torch.from_numpy(x_test_raw).float()
-    y_test_tensor = torch.from_numpy(y_test_raw).long()
+    def eval_for(run: Dict[str, Any], store: EdgeStore) -> Tuple[torch.Tensor, torch.Tensor]:
+        key = ("val", partition_key(run)) if run.get("eval_split", "test") == "val" else "test"
+        if key not in eval_tensors:
+            x, y = store.get_validation_data() if key != "test" else store.get_test_data()
+            eval_tensors[key] = (torch.from_numpy(x).float(), torch.from_numpy(y).long())
+        return eval_tensors[key]
 
     completed_count = 0
-    skipped_count = 0
-    total_runs = len(runs_to_process)
-
     grid_start_time = time.time()
 
-    for idx, run_cfg in enumerate(runs_to_process, start=1):
+    for idx, run_cfg in enumerate(pending, start=1):
         chash = compute_config_hash(run_cfg)
-        if chash in existing_hashes:
-            skipped_count += 1
-            continue
-
         desc = (
-            f"[{idx:03d}/{total_runs:03d}] {run_cfg['experiment_type']} | "
+            f"[{idx:03d}/{len(pending):03d}] {run_cfg['experiment_type']} | "
             f"{run_cfg['aggregator']} | {run_cfg['attack']} "
             f"({run_cfg['attacker_share']*100:.0f}%) | "
             f"act_f={run_cfg['actual_f']} ass_f={run_cfg['assumed_f']} | "
-            f"{run_cfg['wire_precision']} | Seed {run_cfg['seed']}"
+            f"{run_cfg['wire_precision']} | {run_cfg.get('model', 'mlp')} | "
+            f"alpha={run_cfg['dirichlet_alpha']} | R={run_cfg['num_rounds']} | Seed {run_cfg['seed']}"
         )
         print(f"Executing {desc} ...", flush=True)
 
-        store = stores_by_seed[run_cfg["seed"]]
+        store = store_for(run_cfg)
+        x_eval, y_eval = eval_for(run_cfg, store)
         summary, round_records = execute_single_run(
             run_config=run_cfg,
             store=store,
-            x_test_tensor=x_test_tensor,
-            y_test_tensor=y_test_tensor,
+            x_test_tensor=x_eval,
+            y_test_tensor=y_eval,
         )
-
-        con.execute("""
-            INSERT INTO runs VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-            )
-        """, [
-            chash,
-            run_cfg["experiment_type"],
-            run_cfg["aggregator"],
-            run_cfg["attack"],
-            run_cfg["attacker_share"],
-            run_cfg["actual_f"],
-            run_cfg["assumed_f"],
-            run_cfg["wire_precision"],
-            run_cfg["seed"],
-            run_cfg["num_rounds"],
-            run_cfg["num_clients"],
-            summary["final_accuracy"],
-            summary["best_accuracy"],
-            summary["final_loss"],
-            summary["acc_round_10"],
-            summary["acc_round_25"],
-            summary["acc_round_50"],
-            summary["rounds_to_70"],
-            summary["total_uplink_bytes"],
-            summary["bytes_per_client_round"],
-            summary["wall_clock_sec"],
-            summary["attacker_rejection_rate"],
-            summary["honest_false_rejection_rate"],
-            summary["completed_at"],
-        ])
-
-        round_tuples = [
-            (
-                chash,
-                rr["round_num"],
-                rr["test_accuracy"],
-                rr["test_loss"],
-                rr["round_duration_sec"],
-                rr["round_uplink_bytes"],
-                rr["attacker_rejections"],
-                rr["honest_rejections"],
-            )
-            for rr in round_records
-        ]
-        con.executemany("INSERT INTO round_metrics VALUES (?, ?, ?, ?, ?, ?, ?, ?)", round_tuples)
-        existing_hashes.add(chash)
+        insert_run(con, chash, run_cfg, summary, round_records)
         completed_count += 1
 
         print(
@@ -585,18 +787,18 @@ def main():
             flush=True,
         )
 
-    for store in stores_by_seed.values():
+    for store in stores.values():
         store.close()
     con.close()
 
     total_duration = time.time() - grid_start_time
     print("==================================================================")
-    print("Grid Execution Finished.")
-    print(f"Total processed: {completed_count} newly executed, {skipped_count} skipped (resumed).")
+    print("Run Finished.")
+    print(f"Newly executed: {completed_count}")
     print(f"Total elapsed wall-clock time: {total_duration:.2f}s")
+    print("SHARD DONE", flush=True)
     print("==================================================================")
 
 
 if __name__ == "__main__":
     main()
-

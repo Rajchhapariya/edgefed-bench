@@ -1,6 +1,32 @@
-# Changes in the Working Tree
+# Changes on Branch fix/audit-bugs
 
-Branch `fix/audit-bugs`, based on commit 293d825. Nothing is committed.
+Branch `fix/audit-bugs`, based on commit 293d825. The first two rounds below were committed as c192e70. The roadmap round is committed on top of it. Nothing is pushed.
+
+## Third round: roadmap items
+
+| File | Change |
+| :--- | :--- |
+| engine/compression.py | New. Wire formats Float32, INT8, INT4 and 1-bit sign, with exact byte counts. |
+| engine/client.py | Small CNN (`EdgeCNN`) and `build_model`; local training encodes updates in the chosen wire format. |
+| engine/adversary.py | ALIE and IPM attacks; attacker updates are encoded in the run's wire format. |
+| engine/storage.py | Shard directory names include alpha, client count and validation size when they differ from the defaults. Optional validation split. Seed 42 moved to `data/clients_seed_42`. |
+| experiments/run_grid.py | Rewritten. Extended experiments, per-round distance logging (`round_mechanism` table), `torch_threads` and hyperparameter columns, `--shard` and `--skip_db` for parallel runs. Old config hashes are unchanged. |
+| experiments/config.yaml | 10 seeds for the grid and wrong-f; six extended experiments. 1,432 runs in total. |
+| experiments/merge_results.py, partition_stats.py, stats.py, extended_analysis.py | New. Merging shard databases, measured label skew, paired statistics, extended tables and figures. |
+| experiments/make_report_assets.py | Seed counts from the data, Table 6 split by precision, extended sections and key findings generated from the database. |
+| report/edgefed_bench_v2.typ | Rewritten as a standard paper (abstract, numbered sections, captioned tables and figures, author-year references), 12 pages. Adds statistics, mechanism, six extended studies and related work. Every number still comes from `metrics.typ` or `tables.typ`. |
+| README.md, results/ENVIRONMENT.md, ROADMAP.md, AUDIT_REPORT.md, docs/ | Updated to match. `docs/RELATED_WORK.md` is new. |
+| tests/test_extensions.py | New, 15 tests. Other test files updated for the new layout. |
+| .github/workflows/tests.yml | New CI workflow. Not yet run on GitHub. |
+
+How we checked it:
+
+- Two stored runs (Multi-Krum 20% sign-flip INT8 seed 0, and trimmed mean Gaussian 30% Float32) reproduce their stored accuracy exactly through the new code.
+- All 1,432 configurations have distinct hashes; the 320 stored runs keep theirs.
+- The merged database holds 1,432 runs and the expected 76,160 per-round rows.
+- The full test suite passes after the merge (54 tests).
+
+## Earlier rounds
 
 The working tree holds two sets of changes:
 

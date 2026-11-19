@@ -14,7 +14,7 @@ class TestStoragePipeline(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.data_root = "data"
-        cls.clients_dir = Path(cls.data_root) / "clients"
+        cls.clients_dir = Path(cls.data_root) / "clients_seed_42"
         cls.test_parquet = Path(cls.data_root) / "test.parquet"
         cls.telemetry_db = Path(cls.data_root) / "telemetry.duckdb"
         initialize_storage_pipeline(data_root=cls.data_root, num_clients=20, alpha=0.5)

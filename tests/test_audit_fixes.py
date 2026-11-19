@@ -14,7 +14,13 @@ from unittest import mock
 
 import numpy as np
 
-from engine.storage import PARTITION_META_FILENAME, DataPartitioner, EdgeStore, initialize_storage_pipeline
+from engine.storage import (
+    PARTITION_META_FILENAME,
+    DataPartitioner,
+    EdgeStore,
+    client_shard_dir,
+    initialize_storage_pipeline,
+)
 from experiments.run_grid import compute_config_hash, generate_grid_configurations
 
 
@@ -48,31 +54,46 @@ class TestConfigHashHyperparameters(unittest.TestCase):
 
 class TestPartitionRebuild(unittest.TestCase):
     def test_03_alpha_change_triggers_rebuild(self):
-        """Shards built with alpha 0.5 are rebuilt, not reused, when alpha 0.1 is requested."""
+        """Shards in a fixed directory built with alpha 0.5 are rebuilt when alpha 0.1 is requested."""
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
             DataPartitioner, "load_fashion_mnist", _fake_fashion_mnist
         ):
-            initialize_storage_pipeline(data_root=tmp, num_clients=4, alpha=0.5, seed=7)
-            meta_path = Path(tmp) / "clients_seed_7" / PARTITION_META_FILENAME
+            shards = Path(tmp) / "shards"
+            initialize_storage_pipeline(data_root=tmp, num_clients=4, alpha=0.5, seed=7, clients_dir=shards)
+            meta_path = shards / PARTITION_META_FILENAME
             with open(meta_path, encoding="utf-8") as fh:
                 self.assertEqual(json.load(fh)["alpha"], 0.5)
 
-            _, summary = initialize_storage_pipeline(data_root=tmp, num_clients=4, alpha=0.5, seed=7)
+            _, summary = initialize_storage_pipeline(
+                data_root=tmp, num_clients=4, alpha=0.5, seed=7, clients_dir=shards)
             self.assertTrue(summary.get("skipped"))
 
-            _, summary = initialize_storage_pipeline(data_root=tmp, num_clients=4, alpha=0.1, seed=7)
+            _, summary = initialize_storage_pipeline(
+                data_root=tmp, num_clients=4, alpha=0.1, seed=7, clients_dir=shards)
             self.assertFalse(summary.get("skipped", False))
             with open(meta_path, encoding="utf-8") as fh:
                 self.assertEqual(json.load(fh)["alpha"], 0.1)
+
+    def test_03b_default_directories_differ_by_setting(self):
+        """Without an explicit directory, other alpha or client counts never share shards."""
+        self.assertEqual(client_shard_dir("data", 3).name, "clients_seed_3")
+        names = {
+            client_shard_dir("data", 3).name,
+            client_shard_dir("data", 3, alpha=0.1).name,
+            client_shard_dir("data", 3, num_clients=10).name,
+            client_shard_dir("data", 3, validation_size=100).name,
+        }
+        self.assertEqual(len(names), 4)
 
     def test_04_client_count_change_removes_stale_shards(self):
         """Going from 6 to 4 clients leaves exactly 4 shards."""
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
             DataPartitioner, "load_fashion_mnist", _fake_fashion_mnist
         ):
-            initialize_storage_pipeline(data_root=tmp, num_clients=6, alpha=0.5, seed=7)
-            initialize_storage_pipeline(data_root=tmp, num_clients=4, alpha=0.5, seed=7)
-            shards = sorted((Path(tmp) / "clients_seed_7").glob("client_*.parquet"))
+            shard_dir = Path(tmp) / "shards"
+            initialize_storage_pipeline(data_root=tmp, num_clients=6, alpha=0.5, seed=7, clients_dir=shard_dir)
+            initialize_storage_pipeline(data_root=tmp, num_clients=4, alpha=0.5, seed=7, clients_dir=shard_dir)
+            shards = sorted(shard_dir.glob("client_*.parquet"))
             self.assertEqual(len(shards), 4)
 
 
@@ -85,7 +106,7 @@ class TestClientMomentum(unittest.TestCase):
             DataPartitioner, "load_fashion_mnist", _fake_fashion_mnist
         ):
             initialize_storage_pipeline(data_root=tmp, num_clients=2, alpha=0.5, seed=3)
-            with EdgeStore(data_root=tmp, seed=3) as store:
+            with EdgeStore(data_root=tmp, seed=3, num_clients=2) as store:
                 start = EdgeClassifier().get_flat_parameters()
                 updates = []
                 for momentum in (0.0, 0.9):

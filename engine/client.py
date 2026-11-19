@@ -1,7 +1,8 @@
 """Client model and local training.
 
 A client loads its shard once, trains one local epoch of SGD per round, and
-returns its update (optionally INT8-quantized) with the payload size it would send.
+returns its update, encoded in the chosen wire format, with the payload size it
+would send. Two models are available: the MLP used by the main grid and a small CNN.
 """
 
 from __future__ import annotations
@@ -14,21 +15,13 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
+from engine import compression
 from engine.quantization import Int8Quantizer
 from engine.storage import EdgeStore
 
 
-class EdgeClassifier(nn.Module):
-    """MLP 784-128-10 (101,770 parameters) for Fashion-MNIST."""
-
-    def __init__(self, input_dim: int = 784, hidden_dim: int = 128, num_classes: int = 10):
-        super().__init__()
-        self.fc1 = nn.Linear(input_dim, hidden_dim)
-        self.relu = nn.ReLU()
-        self.fc2 = nn.Linear(hidden_dim, num_classes)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.fc2(self.relu(self.fc1(x)))
+class FlatParamsMixin:
+    """Lets the simulation treat any model as one flat float32 parameter vector."""
 
     def get_flat_parameters(self) -> np.ndarray:
         """Returns all trainable parameters as one float32 vector."""
@@ -43,6 +36,53 @@ class EdgeClassifier(nn.Module):
             numel = p.numel()
             p.data.copy_(flat_tensor[offset : offset + numel].view_as(p))
             offset += numel
+
+
+class EdgeClassifier(FlatParamsMixin, nn.Module):
+    """MLP 784-128-10 (101,770 parameters) for Fashion-MNIST."""
+
+    def __init__(self, input_dim: int = 784, hidden_dim: int = 128, num_classes: int = 10):
+        super().__init__()
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Linear(hidden_dim, num_classes)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.fc2(self.relu(self.fc1(x)))
+
+
+class EdgeCNN(FlatParamsMixin, nn.Module):
+    """Small CNN for 28x28 Fashion-MNIST images (20,522 parameters).
+
+    conv 5x5 (8) -> max-pool -> conv 5x5 (16) -> max-pool -> fc 64 -> fc 10.
+    Inputs arrive flattened to 784 values and are reshaped here. The channel counts
+    are kept small so that 20 simulated clients train in reasonable CPU time.
+    """
+
+    def __init__(self, num_classes: int = 10):
+        super().__init__()
+        self.conv1 = nn.Conv2d(1, 8, kernel_size=5)
+        self.conv2 = nn.Conv2d(8, 16, kernel_size=5)
+        self.pool = nn.MaxPool2d(2)
+        self.relu = nn.ReLU()
+        self.fc1 = nn.Linear(16 * 4 * 4, 64)
+        self.fc2 = nn.Linear(64, num_classes)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x.view(-1, 1, 28, 28)
+        x = self.pool(self.relu(self.conv1(x)))
+        x = self.pool(self.relu(self.conv2(x)))
+        return self.fc2(self.relu(self.fc1(x.flatten(1))))
+
+
+MODELS = {"mlp": EdgeClassifier, "cnn": EdgeCNN}
+
+
+def build_model(name: str = "mlp") -> nn.Module:
+    """Returns a fresh model by name ("mlp" or "cnn")."""
+    if name not in MODELS:
+        raise ValueError(f"Unknown model: {name}. Choose from {sorted(MODELS)}.")
+    return MODELS[name]()
 
 
 @dataclass
@@ -70,6 +110,7 @@ class EdgeClient:
         local_epochs: int = 1,
         device: str = "cpu",
         momentum: float = 0.9,
+        model_name: str = "mlp",
     ):
         self.client_id = client_id
         self.store = store
@@ -79,7 +120,7 @@ class EdgeClient:
         self.local_epochs = local_epochs
         self.device = torch.device(device)
 
-        self.model = EdgeClassifier().to(self.device)
+        self.model = build_model(model_name).to(self.device)
         self.criterion = nn.CrossEntropyLoss()
 
         # Load the shard once; every round reuses it.
@@ -97,12 +138,14 @@ class EdgeClient:
         quantize: bool = False,
         round_num: int = 1,
         seed: Optional[int] = None,
+        precision: Optional[str] = None,
     ) -> ClientUpdate:
         """Trains one round from the global weights and returns the update.
 
         Args:
             global_params: Continuous float32 array of global weights.
             quantize: If True, compresses the parameter update vector to INT8.
+            precision: Wire format ("Float32", "INT8", "INT4" or "Sign"). Overrides quantize.
             round_num: Current communication round index (for deterministic shuffling).
             seed: Master random seed for deterministic execution.
 
@@ -147,10 +190,11 @@ class EdgeClient:
         raw_update = local_params - global_params
         grad_norm = float(np.linalg.norm(raw_update))
 
-        if quantize:
-            q_arr, scale = Int8Quantizer.quantize(raw_update)
-            payload_bytes = Int8Quantizer.measure_payload(q_arr, scale)
-            reconstructed_update = Int8Quantizer.dequantize(q_arr, scale)
+        if precision is None:
+            precision = "INT8" if quantize else "Float32"
+
+        if precision != "Float32":
+            reconstructed_update, payload_bytes = compression.encode(raw_update, precision)
             noise_metrics = Int8Quantizer.compute_noise_metrics(raw_update, reconstructed_update)
 
             return ClientUpdate(

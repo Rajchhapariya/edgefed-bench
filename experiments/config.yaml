@@ -1,4 +1,7 @@
-# EdgeFed-Bench v2: Experiment Grid Configuration
+# EdgeFed-Bench experiment configuration.
+# Seeds 0-4 of the grid and wrong-f experiment were the first run; seeds 5-9 were
+# added later for tighter confidence intervals. Runs are keyed by a config hash, so
+# extending a seed list only runs the new seeds.
 
 grid:
   aggregators:
@@ -17,12 +20,7 @@ grid:
   precisions:
     - Float32
     - INT8
-  seeds:
-    - 0
-    - 1
-    - 2
-    - 3
-    - 4
+  seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   num_rounds: 50
   num_clients: 20
   dirichlet_alpha: 0.5
@@ -42,12 +40,7 @@ wrong_f_experiment:
     - 6
     - 8
   precision: INT8
-  seeds:
-    - 0
-    - 1
-    - 2
-    - 3
-    - 4
+  seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   num_rounds: 50
   num_clients: 20
   dirichlet_alpha: 0.5
@@ -55,3 +48,61 @@ wrong_f_experiment:
   lr: 0.05
   momentum: 0.9
 
+# Experiments added after the main grid. Each uses the common settings unless it
+# overrides them. Scenarios are [attack, attacker share] pairs.
+extensions:
+  common:
+    num_rounds: 50
+    num_clients: 20
+    dirichlet_alpha: 0.5
+    batch_size: 128
+    lr: 0.05
+    momentum: 0.9
+    seeds: [0, 1, 2, 3, 4]
+
+  # Attacks designed to sit close to honest updates.
+  strong_attacks:
+    aggregators: [FedAvg, Multi-Krum, Coordinate median, Trimmed mean]
+    attacks: [ALIE, IPM]
+    attacker_shares: [0.10, 0.20, 0.30]
+    precisions: [Float32, INT8]
+
+  # Stronger (0.1) and weaker (1.0) label skew than the main grid's 0.5.
+  alpha_sweep:
+    alphas: [0.1, 1.0]
+    aggregators: [FedAvg, Multi-Krum, Coordinate median, Trimmed mean]
+    scenarios: [[none, 0.0], [sign-flip, 0.20], [ALIE, 0.20]]
+    precisions: [Float32, INT8]
+
+  # Fewer bits than INT8. Float32 and INT8 references come from the grid and strong_attacks.
+  bit_width:
+    aggregators: [FedAvg, Multi-Krum, Coordinate median, Trimmed mean]
+    scenarios: [[none, 0.0], [sign-flip, 0.20], [ALIE, 0.20]]
+    precisions: [INT4, Sign]
+
+  # A second model on the same data. A CNN round costs about 4 times an MLP round on
+  # this CPU, so this study uses 3 seeds and 30 rounds.
+  cnn:
+    num_rounds: 30
+    seeds: [0, 1, 2]
+    aggregators: [FedAvg, Multi-Krum, Coordinate median, Trimmed mean]
+    scenarios: [[none, 0.0], [sign-flip, 0.20], [ALIE, 0.20]]
+    precisions: [Float32, INT8]
+
+  # Three times as many rounds, to check whether 50-round results have settled.
+  long_run:
+    num_rounds: 150
+    aggregators: [Multi-Krum, Coordinate median, Trimmed mean]
+    scenarios: [[none, 0.0], [sign-flip, 0.20]]
+    precisions: [Float32, INT8]
+
+  # Hyperparameter check on a validation split held out from the training set.
+  # Scored on validation accuracy, never on the test set.
+  tuning:
+    aggregator: FedAvg
+    precision: Float32
+    lrs: [0.01, 0.02, 0.05, 0.1, 0.2]
+    momenta: [0.0, 0.9]
+    batch_sizes: [64, 128]
+    seeds: [0, 1, 2]
+    validation_size: 10000

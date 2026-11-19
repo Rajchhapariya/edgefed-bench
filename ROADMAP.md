@@ -1,40 +1,43 @@
 # Roadmap
 
-What remains before this project can support a research paper, most important first. The reasons come from the audit in `AUDIT_REPORT.md` and the current results in `results/results.duckdb`.
-
-The full grid currently takes about 2.5 hours of CPU time. Items 1, 4, 5 and 7 each multiply that cost.
+Status of the items from the audit in `AUDIT_REPORT.md`. Every item below was worked on in version 2.1. Results are in `results/results.duckdb`, the README results block and `report/edgefed_bench_v2.pdf`.
 
 ## Needed before writing the paper
 
-1. **More seeds and proper statistics.**
-   - Five seeds is too few for the unstable settings: FedAvg at 20% sign-flip is 41.67 +- 27.62%, and trimmed mean at wrong f = 2 is 21.62 +- 14.02%.
-   - Move to 10 or more seeds.
-   - Add paired tests and 95% confidence intervals for INT8 versus Float32 (same seed, same configuration), so the "smaller than one standard deviation" statement becomes a statistical claim.
-2. **Validation split and hyperparameter source.**
-   - The source of lr 0.05, momentum 0.9 and batch size 128: Not found in available documents.
-   - Either hold out a validation set and tune on it, or cite where these values come from.
-3. **Measure the mechanism.**
-   - The report's hypothesis is that INT8 error is small next to the distance between honest and attacker updates. That distance was never measured.
-   - Log, per round, the INT8 error norm, the mean honest-to-honest distance and the mean honest-to-attacker distance.
-4. **A stronger attack.**
-   - Sign-flip and Gaussian are easy for Multi-Krum to detect.
-   - Add one attack designed to stay close to honest updates, such as A Little Is Enough (ALIE) or Inner Product Manipulation (IPM). This is where INT8 noise is most likely to change the outcome.
+1. **More seeds and proper statistics.** Done.
+   - The main grid and the wrong-f experiment now use 10 seeds (0 to 9).
+   - `experiments/stats.py` gives paired 95% confidence intervals, exact permutation p-values and Holm correction within each aggregator. Results: README 3.6, report Section 3.5.
+   - The equivalence margin of 0.5 points was chosen after seeing seeds 0 to 4. Seeds 5 to 9 are reported separately as a confirmation.
+2. **Validation split and hyperparameter source.** Done as a check, not a retune.
+   - 10,000 training images are held out as a validation split. 20 settings of learning rate, momentum and batch size were scored on it for clean FedAvg (README 3.13, report Section 4.6).
+   - The fixed setting ranks 6 of 20. The rest of the study was not rerun with the best setting. Where the original values came from: Not found in available documents.
+3. **Measure the mechanism.** Done.
+   - Every attacked run added in version 2.1 logs honest-to-honest distance, honest-to-attacker distance and the codec error per round (`round_mechanism` table; README 3.7, report Section 3.6).
+4. **A stronger attack.** Done.
+   - ALIE and IPM, both omniscient (README 3.8, report Section 4.1).
 
 ## Would strengthen the paper
 
-5. **Alpha sweep.** Try alpha 0.1, 0.5 and 1.0. At alpha 0.5 most clients hold 9 or 10 of the 10 classes, so the skew is mild.
-6. **Second model or dataset.** For example a small CNN on CIFAR-10.
-7. **Lower bit widths.** 4-bit and sign-only updates, to find where quantization starts to hurt the defences.
-8. **Training to convergence.** Accuracy is still rising at round 50. Run longer, or report a convergence criterion.
-9. **Related work.** Position the result against prior work on Byzantine-robust aggregation with compressed or quantized updates. Not found in available documents.
+5. **Alpha sweep.** Done for alpha 0.1 and 1.0 (README 3.9, report Section 4.2).
+   - Correction to the earlier note: with a 1% threshold, clients at alpha 0.5 hold on average 7.9 classes (seeds 0 to 4), not 9 or 10. The `partition_stats` table holds the measured values.
+6. **Second model or dataset.** Partly done.
+   - A small CNN on Fashion-MNIST, with 3 seeds and 30 rounds (README 3.11, report Section 4.4).
+   - A second dataset such as CIFAR-10 was not run.
+7. **Lower bit widths.** Done: INT4 and 1-bit sign, without error feedback (README 3.10, report Section 4.3).
+8. **Training to convergence.** Done as a check: 150 rounds for the three robust aggregators (README 3.12, report Section 4.5). Accuracy is still rising at round 150. The main grid stays at 50 rounds.
+9. **Related work.** Done in `docs/RELATED_WORK.md` and report Section 5.
 
 ## Small cleanups
 
-10. Store seed 42 shards in `data/clients_seed_42` like the other seeds, instead of `data/clients`.
-11. Split Table 6 (Multi-Krum rejection) by precision instead of pooling INT8 and Float32.
-12. Add a CI workflow that runs the test suite on every push.
-13. Record the PyTorch thread count in the `runs` table, not only in `results/ENVIRONMENT.md`.
+10. Seed 42 shards moved to `data/clients_seed_42`. Done.
+11. Table 6 (Multi-Krum rejection) split by precision. Done.
+12. CI workflow added in `.github/workflows/tests.yml`. Not yet run on GitHub, because nothing has been pushed.
+13. PyTorch thread count stored in the `torch_threads` column. Done.
 
-## Suggested order
+## Open items
 
-Item 3 first, then item 4. Both are cheap and are the first things a reviewer will ask about. Then item 1, which needs the most compute.
+- A second dataset.
+- Rerunning the study at the best validation setting, or tuning per aggregator.
+- Error feedback for INT4 and Sign.
+- Testing why coordinate median loses accuracy under INT8, and much more under INT4.
+- More seeds for the extended studies. With 5 seeds the smallest possible p-value is 0.0625.

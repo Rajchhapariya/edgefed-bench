@@ -39,6 +39,30 @@ A single-run benchmark profile consisting of 50 communication rounds across 20 e
 - **Wrong-f Experiment:** 40 further runs (not included in the projection above).
 - **Measured Wall-Clock Time (from `wall_clock_sec` in `results/results.duckdb`):** 4.594 hours summed over the 280-run grid and 1.183 hours over the 40 wrong-f runs.
   The 160 INT8 attacked runs (120 grid, 40 wrong-f) were rerun on 2026-11-19 after attacker updates were made valid INT8 payloads. They ran four processes at a time at 10 threads each, so their per-run times are inflated by CPU sharing. The other 160 runs were not rerun; they take 1.363 hours in total.
-- **Thread Count:** all stored runs used 10 PyTorch threads. `experiments/run_grid.py --threads 10` reproduces them.
+- **Thread Count:** the 320 runs above (seeds 0 to 4 of the grid and wrong-f experiment) used 10 PyTorch threads. `experiments/run_grid.py --threads 10` reproduces them.
 - **Decision on Round Count:** Because the projected duration of 3.78 hours is substantially below the 24-hour threshold, the full protocol of **50 rounds** is retained without reduction.
+
+---
+
+## 4. Extended Study (2026-11-19 to 2026-11-20)
+
+The 1,112 runs added in version 2.1 (grid and wrong-f seeds 5 to 9, and the six extended studies) ran as 8 parallel processes with 2 PyTorch threads each, 139 runs per process. Each run's thread count is stored in the `torch_threads` column of `runs`.
+
+- **Elapsed time:** 15,148 seconds (about 4.2 hours) for the slowest process, from its log.
+- **Summed run time (from `wall_clock_sec`):** 33.272 hours over the 1,112 runs. Because 8 processes shared the CPU, per-run times are longer than a run would take alone.
+- **Mean seconds per round, by experiment:**
+
+| Experiment | Runs | Summed hours | Seconds per round |
+| :--- | :--- | :--- | :--- |
+| grid (seeds 5 to 9) | 280 | 5.055 | 1.300 |
+| wrong_f (seeds 5 to 9) | 40 | 0.743 | 1.338 |
+| strong_attacks | 240 | 5.478 | 1.644 |
+| alpha_sweep | 240 | 6.315 | 1.894 |
+| bit_width | 120 | 3.235 | 1.941 |
+| long_run | 60 | 4.519 | 1.807 |
+| tuning | 60 | 1.703 | 2.043 |
+| cnn | 72 | 6.225 | 10.374 |
+
+- **CNN cost:** 10.374 seconds per round against 1.664 for the MLP at the same thread count and load.
+- **Reproducing these runs:** use `--threads 2`. Results at 10 threads will differ slightly in the last digits.
 

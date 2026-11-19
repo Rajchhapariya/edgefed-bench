@@ -1,8 +1,9 @@
 """Builds the figures, tables and report numbers from results/results.duckdb.
 
-Outputs: two figures (PNG and PDF), Markdown tables in the README results block,
+Outputs: figures (PNG and PDF), Markdown tables in the README results block,
 report/tables.typ, report/metrics.typ and report/summary_metrics.json. Every number
-comes from a SQL query on the database; none is typed by hand. No pandas.
+comes from a SQL query on the database; none is typed by hand. No pandas. The
+extended study's tables come from experiments/extended_analysis.py.
 """
 
 from __future__ import annotations
@@ -20,6 +21,22 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from experiments import extended_analysis
+
+
+# Serif text to match the report body. Titles go in the report captions, not the figures.
+PAPER_RC = {"font.family": "serif", "font.serif": ["Times New Roman", "DejaVu Serif"],
+            "mathtext.fontset": "stix"}
+
+
+def grid_seeds(con: duckdb.DuckDBPyConnection) -> Tuple[int, int, int]:
+    """(number of seeds, lowest seed, highest seed) in the main grid."""
+    n, lo, hi = con.execute(
+        "SELECT count(DISTINCT seed), min(seed), max(seed) FROM runs WHERE experiment_type='grid'"
+    ).fetchone()
+    return int(n), int(lo), int(hi)
 
 
 def ensure_dirs(*dirs: Path):
@@ -57,6 +74,7 @@ def generate_figure_1_convergence(con: duckdb.DuckDBPyConnection, target_dirs: L
         agg_data[agg]["stds"].append(std_acc if std_acc is not None else 0.0)
 
     plt.style.use("seaborn-v0_8-whitegrid" if "seaborn-v0_8-whitegrid" in plt.style.available else "default")
+    plt.rcParams.update(PAPER_RC)
     fig, ax = plt.subplots(figsize=(7.5, 4.2), dpi=300)
 
     color_map = {
@@ -86,7 +104,6 @@ def generate_figure_1_convergence(con: duckdb.DuckDBPyConnection, target_dirs: L
         ax.plot(rounds, means, label=agg, color=color, linestyle=linestyle, linewidth=2.0)
         ax.fill_between(rounds, means - stds, means + stds, color=color, alpha=0.15)
 
-    ax.set_title("Convergence Trajectory under 20% Sign-Flip Attack (INT8, 5 Seeds)", fontsize=11, fontweight="bold", pad=10)
     ax.set_xlabel("Communication Round", fontsize=10, labelpad=8)
     ax.set_ylabel("Global Test Accuracy (%)", fontsize=10, labelpad=8)
     ax.set_xlim(1, 50)
@@ -130,6 +147,7 @@ def generate_figure_2_attacker_share(con: duckdb.DuckDBPyConnection, target_dirs
         agg_data[agg]["stds"].append(std_acc if std_acc is not None else 0.0)
 
     plt.style.use("seaborn-v0_8-whitegrid" if "seaborn-v0_8-whitegrid" in plt.style.available else "default")
+    plt.rcParams.update(PAPER_RC)
     fig, ax = plt.subplots(figsize=(6.8, 4.2), dpi=300)
 
     color_map = {
@@ -162,7 +180,6 @@ def generate_figure_2_attacker_share(con: duckdb.DuckDBPyConnection, target_dirs
             capsize=4, capthick=1.2, linewidth=1.8, markersize=6
         )
 
-    ax.set_title("Final Accuracy vs. Attacker Share (Sign-Flip Attack, INT8, 5 Seeds)", fontsize=11, fontweight="bold", pad=10)
     ax.set_xlabel("Byzantine Attacker Share (%)", fontsize=10, labelpad=8)
     ax.set_ylabel("Final Test Accuracy (%)", fontsize=10, labelpad=8)
     ax.set_xticks(shares)
@@ -181,7 +198,7 @@ def generate_figure_2_attacker_share(con: duckdb.DuckDBPyConnection, target_dirs
 
 
 def build_table_1_robustness(con: duckdb.DuckDBPyConnection) -> Tuple[str, str]:
-    """Table 1: Final Accuracy (mean +- std over 5 seeds) per aggregator x attack x share (INT8 only)."""
+    """Table 1: Final Accuracy (mean +- std over seeds) per aggregator x attack x share (INT8 only)."""
     clean_rows = con.execute("""
         SELECT
             aggregator,
@@ -241,8 +258,8 @@ def build_table_1_robustness(con: duckdb.DuckDBPyConnection) -> Tuple[str, str]:
     typst_table = (
         "#let table_1_robustness = table(\n"
         "  columns: (1.4fr, 1fr, 2fr, 2fr, 2.2fr, 2fr),\n"
-        "  fill: (col, row) => if row == 0 { rgb(\"#f1f5f9\") } else { none },\n"
-        "  stroke: 0.5pt + rgb(\"#cbd5e1\"),\n"
+        "  fill: none,\n"
+        "  stroke: (x, y) => if y == 0 { (top: 0.8pt, bottom: 0.4pt) },\n"
         "  inset: 4pt,\n"
         + "\n".join(typ_rows) + "\n)\n"
     )
@@ -303,8 +320,8 @@ def build_table_2_precision_comparison(con: duckdb.DuckDBPyConnection) -> Tuple[
     typst_table = (
         "#let table_2_precision = table(\n"
         "  columns: (1.6fr, 1.8fr, 1.8fr, 1.1fr, 1.5fr, 1.5fr, 1.1fr),\n"
-        "  fill: (col, row) => if row == 0 { rgb(\"#f1f5f9\") } else { none },\n"
-        "  stroke: 0.5pt + rgb(\"#cbd5e1\"),\n"
+        "  fill: none,\n"
+        "  stroke: (x, y) => if y == 0 { (top: 0.8pt, bottom: 0.4pt) },\n"
         "  inset: 4pt,\n"
         + "\n".join(typ_rows) + "\n)\n"
     )
@@ -313,7 +330,7 @@ def build_table_2_precision_comparison(con: duckdb.DuckDBPyConnection) -> Tuple[
 
 
 def build_table_5_wrong_f(con: duckdb.DuckDBPyConnection) -> Tuple[str, str]:
-    """Table 5: Sensitivity to misconfigured f (Actual f=6 [30%], sign-flip, INT8, 5 seeds)."""
+    """Table 5: Sensitivity to misconfigured f (Actual f=6 [30%], sign-flip, INT8)."""
     rows = con.execute("""
         SELECT
             assumed_f,
@@ -364,8 +381,8 @@ def build_table_5_wrong_f(con: duckdb.DuckDBPyConnection) -> Tuple[str, str]:
     typst_table = (
         "#let table_3_wrong_f = table(\n"
         "  columns: (1.1fr, 1.4fr, 1.8fr, 1.8fr, 3.2fr),\n"
-        "  fill: (col, row) => if row == 0 { rgb(\"#f1f5f9\") } else { none },\n"
-        "  stroke: 0.5pt + rgb(\"#cbd5e1\"),\n"
+        "  fill: none,\n"
+        "  stroke: (x, y) => if y == 0 { (top: 0.8pt, bottom: 0.4pt) },\n"
         "  inset: 4pt,\n"
         + "\n".join(typ_rows) + "\n)\n"
     )
@@ -402,35 +419,36 @@ def build_table_6_multikrum_dynamics(con: duckdb.DuckDBPyConnection) -> Tuple[st
         SELECT
             attack,
             CAST(ROUND(attacker_share * 100) AS INTEGER) AS share_pct,
+            wire_precision,
             AVG(attacker_rejection_rate) * 100.0 AS mean_att_rej,
             COALESCE(STDDEV(attacker_rejection_rate), 0.0) * 100.0 AS std_att_rej,
             AVG(honest_false_rejection_rate) * 100.0 AS mean_hon_rej,
             COALESCE(STDDEV(honest_false_rejection_rate), 0.0) * 100.0 AS std_hon_rej
         FROM runs
         WHERE aggregator = 'Multi-Krum' AND attack != 'none' AND experiment_type = 'grid'
-        GROUP BY attack, share_pct
-        ORDER BY attack, share_pct;
+        GROUP BY attack, share_pct, wire_precision
+        ORDER BY attack, share_pct, wire_precision;
     """).fetchall()
 
     md_lines = [
-        "| Attack Vector | Attacker Share | Attacker Rejection Rate (%) | Honest False-Rejection Rate (%) |",
-        "| :--- | :--- | :--- | :--- |",
+        "| Attack Vector | Attacker Share | Wire | Attacker Rejection Rate (%) | Honest False-Rejection Rate (%) |",
+        "| :--- | :--- | :--- | :--- | :--- |",
     ]
     typ_rows = [
-        "  [*Attack Vector*], [*Attacker Share*], [*Attacker Rejection Rate*], [*Honest False-Rejection Rate*],",
+        "  [*Attack Vector*], [*Attacker Share*], [*Wire*], [*Attacker Rejection Rate*], [*Honest False-Rejection Rate*],",
     ]
 
-    for atk, sh, m_att, s_att, m_hon, s_hon in rows:
+    for atk, sh, prec, m_att, s_att, m_hon, s_hon in rows:
         att_str = f"{m_att:.2f} +- {s_att:.2f}%"
         hon_str = f"{m_hon:.2f} +- {s_hon:.2f}%"
-        md_lines.append(f"| {atk} | {sh}% | {att_str} | {hon_str} |")
-        typ_rows.append(f"  [{atk}], [{sh}%], [{att_str}], [{hon_str}],")
+        md_lines.append(f"| {atk} | {sh}% | {prec} | {att_str} | {hon_str} |")
+        typ_rows.append(f"  [{atk}], [{sh}%], [{prec}], [{att_str}], [{hon_str}],")
 
     typst_table = (
         "#let table_4_multikrum = table(\n"
-        "  columns: (1.8fr, 1.4fr, 2.8fr, 2.8fr),\n"
-        "  fill: (col, row) => if row == 0 { rgb(\"#f1f5f9\") } else { none },\n"
-        "  stroke: 0.5pt + rgb(\"#cbd5e1\"),\n"
+        "  columns: (1.6fr, 1.3fr, 1fr, 2.5fr, 2.5fr),\n"
+        "  fill: none,\n"
+        "  stroke: (x, y) => if y == 0 { (top: 0.8pt, bottom: 0.4pt) },\n"
         "  inset: 4.5pt,\n"
         + "\n".join(typ_rows) + "\n)\n"
     )
@@ -498,6 +516,9 @@ def extract_prose_metrics(con: duckdb.DuckDBPyConnection) -> Dict[str, str]:
     out["grid_runs"] = str(one("SELECT COUNT(*) FROM runs WHERE experiment_type='grid'")[0])
     out["wrong_f_runs"] = str(one("SELECT COUNT(*) FROM runs WHERE experiment_type='wrong_f'")[0])
     out["total_runs"] = str(int(out["grid_runs"]) + int(out["wrong_f_runs"]))
+    n_all = one("SELECT COUNT(*) FROM runs")[0]
+    out["all_runs"] = f"{n_all:,}"
+    out["ext_runs"] = f"{n_all - int(out['total_runs']):,}"
     out["attacked_runs"] = str(one("SELECT COUNT(*) FROM runs WHERE experiment_type='grid' AND attack<>'none'")[0])
     b32 = one("SELECT AVG(bytes_per_client_round) FROM runs WHERE experiment_type='grid' AND wire_precision='Float32'")[0]
     b8 = one("SELECT AVG(bytes_per_client_round) FROM runs WHERE experiment_type='grid' AND wire_precision='INT8'")[0]
@@ -553,8 +574,46 @@ def key_findings_md(m: Dict[str, str]) -> str:
 - **Defences at 30% sign-flip (INT8):** Multi-Krum {m["mk30"]} +- {m["mk30_sd"]}%, trimmed mean {m["tm30"]} +- {m["tm30_sd"]}%, coordinate median {m["cm30"]} +- {m["cm30_sd"]}%.
 - **Multi-Krum attacker rejection (INT8 and Float32 pooled):** {m["rej_gauss_min"]}% in the worst Gaussian run. Under sign-flip the mean over seeds is between {m["rej_sf_min"]}% and {m["rej_sf_max"]}%, depending on attacker share, so some sign-flip updates are accepted.
 - **Wrong assumed f (actual f = 6):** at assumed f = 2, Multi-Krum ends at {m["mk_wf2"]}% and trimmed mean at {m["tm_wf2"]}%. At assumed f = 8 they end at {m["mk_wf8"]}% and {m["tm_wf8"]}%.
+""" + extended_findings_md(m) + "\n"
 
-"""
+
+def extended_findings_md(m: Dict[str, str]) -> str:
+    """Key findings from the extended study; each bullet appears only if its data exists."""
+    out = []
+    if "stat_n_equiv_robust" in m:
+        out.append(
+            f'- **Paired tests ({m["stat_n_seeds"]} seeds):** for Multi-Krum, coordinate median and trimmed mean, '
+            f'the 95% CI of INT8 minus Float32 lies inside +-{m["stat_margin"]} accuracy points in '
+            f'{m["stat_n_equiv_robust"]} of {m["stat_n_robust"]} settings. Significant differences after Holm '
+            f'correction: {m["stat_sig_list"]}. The largest is {m["stat_max_abs_robust"]} points.')
+    if "mech_signflip_int8_err" in m:
+        out.append(
+            f'- **Mechanism (Multi-Krum, 20% sign-flip):** the INT8 error of an honest update has L2 norm '
+            f'{m["mech_signflip_int8_err"]}, against {m["mech_signflip_int8_pair"]} between two honest updates and '
+            f'{m["mech_signflip_int8_att"]} between an honest and an attacker update.')
+    if "sa_ipm30_multikrum_rej" in m:
+        out.append(
+            f'- **ALIE and IPM:** Multi-Krum rejected {m["sa_alie30_multikrum_rej"]}% of ALIE and '
+            f'{m["sa_ipm30_multikrum_rej"]}% of IPM updates at 30%. Under 30% IPM it ends at '
+            f'{m["sa_ipm30_multikrum_int8"]}% (INT8), below FedAvg at {m["sa_ipm30_fedavg_int8"]}%.')
+    if "al_coordinate_none_a0p1_diff" in m:
+        n_al = int(m["al_coordinate_none_a0p1_n"])
+        floor = ", the smallest p possible with that many seeds" \
+            if m["al_coordinate_none_a0p1_p"] == f"{2 / 2 ** n_al:.3f}" else ""
+        out.append(
+            f'- **Strong label skew (alpha 0.1):** in clean runs, coordinate median with INT8 ends at '
+            f'{m["al_coordinate_none_a0p1"]}%; INT8 minus Float32 is {m["al_coordinate_none_a0p1_diff"]} points '
+            f'({m["al_coordinate_none_a0p1_n"]} seeds, p = {m["al_coordinate_none_a0p1_p"]}{floor}).')
+    if "bw_coordinate_signflip_int4" in m:
+        out.append(
+            f'- **INT4 and 1-bit sign:** at 20% sign-flip, Multi-Krum keeps {m["bw_multikrum_signflip_int4"]}% with INT4 '
+            f'and {m["bw_multikrum_signflip_sign"]}% with Sign; coordinate median falls to '
+            f'{m["bw_coordinate_signflip_int4"]}% with INT4 but keeps {m["bw_coordinate_signflip_sign"]}% with Sign.')
+    if "tune_default_rank" in m:
+        out.append(
+            f'- **Hyperparameters:** on a held-out validation split, our fixed setting ranks {m["tune_default_rank"]} of '
+            f'{m["tune_n_configs"]} for clean FedAvg, {m["tune_gap"]} points below the best ({m["tune_best"]}).')
+    return "\n".join(out) + ("\n" if out else "")
 
 
 def update_readme_results(readme_path: Path, new_results_md: str):
@@ -622,6 +681,7 @@ def main():
     table_2_md, table_2_typ = build_table_2_precision_comparison(con)
     table_5_md, table_3_typ = build_table_5_wrong_f(con)
     table_6_md, table_4_typ = build_table_6_multikrum_dynamics(con)
+    ext_md, ext_typ, ext_metrics = extended_analysis.build(con, [figures_dir, report_dir / "figures"])
 
     typst_path = report_dir / "tables.typ"
     with open(typst_path, "w", encoding="utf-8") as f:
@@ -631,6 +691,7 @@ def main():
         f.write(table_2_typ + "\n")
         f.write(table_3_typ + "\n")
         f.write(table_4_typ + "\n")
+        f.write(ext_typ + "\n")
     print(f"[+] Saved Typst tables to: {typst_path}")
 
     metrics = extract_summary_metrics(con)
@@ -640,13 +701,17 @@ def main():
     print(f"[+] Saved summary metrics to: {metrics_path}")
 
     prose = extract_prose_metrics(con)
+    n_seeds, seed_lo, seed_hi = grid_seeds(con)
+    prose["grid_seeds"] = str(n_seeds)
+    prose["grid_seed_range"] = f"{seed_lo} to {seed_hi}"
+    prose.update(ext_metrics)
     write_prose_typ(report_dir / "metrics.typ", prose)
     print(f"[+] Saved report prose metrics to: {report_dir / 'metrics.typ'}")
 
-    results_md = key_findings_md(prose) + f"""## 3. Results by Configuration (50 Rounds, 20 Clients, $\\alpha = 0.5$, 5 Seeds)
+    results_md = key_findings_md(prose) + f"""## 3. Results by Configuration (50 Rounds, 20 Clients, $\\alpha = 0.5$, {n_seeds} Seeds)
 
 ### 3.1. Final Accuracy by Attack and Aggregator (INT8)
-Final test accuracy, mean $\\pm$ standard deviation over seeds 0 to 4:
+Final test accuracy, mean $\\pm$ standard deviation over seeds {seed_lo} to {seed_hi}:
 
 {table_1_md}
 
@@ -668,10 +733,11 @@ The server is told a number of attackers $f$ that differs from the actual 6:
 {table_5_md}
 
 ### 3.5. Multi-Krum Rejection Rates
-Attacker rejection and honest false-rejection rates, averaged over all 50 rounds, pooled over INT8 and Float32 (10 runs per cell):
+Attacker rejection and honest false-rejection rates, averaged over all 50 rounds and over seeds, for each wire precision:
 
 {table_6_md}
-"""
+
+{ext_md}"""
 
     update_readme_results(readme_path, results_md)
     con.close()

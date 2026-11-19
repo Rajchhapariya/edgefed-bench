@@ -120,4 +120,27 @@ Effect of the B7 rerun: 122 of the 160 rerun runs changed, while the other 160 r
 
 Removed: `verify_storage.py`, whose checks the storage tests cover, and `data/telemetry_time.duckdb`, an orphan file no code references.
 
-Still open: every gap in section 5.
+Still open at that point: every gap in section 5.
+
+## 8. Status after the roadmap work (2026-11-20, branch fix/audit-bugs)
+
+| ID | Status |
+| :--- | :--- |
+| B8 | Fixed. Each run's thread count is stored in the `torch_threads` column. |
+| B10 | Fixed. Seed 42 shards moved to `data/clients_seed_42`, like the other seeds. |
+| B12 | Fixed. Table 6 reports INT8 and Float32 separately. |
+
+Gaps from section 5:
+
+| Gap | Status |
+| :--- | :--- |
+| 1. Convergence | Checked with 150-round runs. Accuracy still rises after round 50 (by 1.66 to 2.23 points by round 150). The main grid stays at 50 rounds. |
+| 2. Statistics | 10 seeds, paired confidence intervals, exact permutation tests, Holm correction. |
+| 3. Scope | Added ALIE, IPM, alpha 0.1 and 1.0, INT4, 1-bit sign and a small CNN. No second dataset. |
+| 4. Methodology | Validation split added; the fixed hyperparameters rank 6 of 20 for clean FedAvg. Hyperparameter source: Not found in available documents. FedAvg stays unweighted. |
+| 5. Related work | `docs/RELATED_WORK.md` and report Section 5. |
+| 6. Theory | The S/2 error bound is now compared with measured distances (report Section 3.6). No formal proof is added. |
+| 7. Reproducibility notes | Thread counts recorded per run; `results/ENVIRONMENT.md` updated. |
+| 8. Build specification | Not found in available documents. |
+
+New finding from the extended runs: coordinate median loses a small but consistent amount of accuracy under INT8 (significant in all 7 main-grid settings, at most 0.81 points), and much more under INT4. The cause has not been tested.
