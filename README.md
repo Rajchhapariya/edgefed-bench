@@ -415,6 +415,11 @@ python -m unittest discover tests -v
 
 The tests cover storage and partitioning, the validation split, every wire format, all four attacks, all four aggregators, both models, the simulation loop, the runner and merger, and the statistics. Some tests build shards under `data/` and download Fashion-MNIST the first time. The CIFAR-10 experiment downloads CIFAR-10 (about 170 MB) into `data/cifar10/` the first time it runs.
 
+**Datasets.** Both datasets are downloaded through torchvision at run time and are not stored in this repository; `data/` is git-ignored.
+
+- **Fashion-MNIST** (Xiao, Rasul and Vollgraf, 2017), from Zalando Research, released under the MIT License: https://github.com/zalandoresearch/fashion-mnist
+- **CIFAR-10** (Krizhevsky, 2009), from the University of Toronto: https://www.cs.toronto.edu/~kriz/cifar.html. The page states no license and asks users to cite the technical report.
+
 ### 7.3. Running the Experiments
 
 `experiments/config.yaml` defines 1,624 runs: the main grid (560), wrong-f (80), and eight extended experiments. Each finished run is stored under a config hash, so a stopped job resumes where it left off. Runs are bit-for-bit repeatable on the same machine at the same PyTorch thread count; each run's thread count is stored in the `torch_threads` column.
@@ -484,5 +489,7 @@ con.close()
 13. **Ghosh, A., Maity, R. K., Kadhe, S., Mazumdar, A., & Ramchandran, K. (2021).** Communication-efficient and Byzantine-robust distributed learning with error feedback. _IEEE Journal on Selected Areas in Information Theory_, 2(3).
 14. **Zhu, H., & Ling, Q. (2023).** Byzantine-robust distributed learning with compression. _IEEE Transactions on Signal and Information Processing over Networks_. DOI 10.1109/TSIPN.2023.3265892.
 15. **Hsu, T.-M. H., Qi, H., & Brown, M. (2019).** Measuring the effects of non-identical data distribution for federated visual classification. _arXiv:1909.06335_.
+16. **Xiao, H., Rasul, K., & Vollgraf, R. (2017).** Fashion-MNIST: A novel image dataset for benchmarking machine learning algorithms. _arXiv:1708.07747_.
+17. **Krizhevsky, A. (2009).** Learning multiple layers of features from tiny images. Technical report, University of Toronto.
 
 License: MIT

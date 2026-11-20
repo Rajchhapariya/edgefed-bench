@@ -83,7 +83,7 @@ We propose no new method. Prior work designs compressed robust algorithms and pr
 = Setup <sec-setup>
 
 == Data and partitioning
-We use Fashion-MNIST: 60,000 training images, 10,000 test images, 10 classes. The training set is split across $N = 20$ clients with a Dirichlet distribution. The main grid uses $alpha = 0.5$; the label-skew study adds $alpha = 0.1$ and $alpha = 1.0$. Each split is written once to Parquet shards and read back through DuckDB (Raasveldt and Mühleisen, 2019), so every run with the same seed and $alpha$ sees the same data. One extended study uses CIFAR-10 (Krizhevsky, 2009): 50,000 training and 10,000 test colour images of 32#sym.times\32 pixels in 10 classes, split the same way with $alpha = 0.5$.
+We use Fashion-MNIST (Xiao et al., 2017): 60,000 training images, 10,000 test images, 10 classes. The training set is split across $N = 20$ clients with a Dirichlet distribution. The main grid uses $alpha = 0.5$; the label-skew study adds $alpha = 0.1$ and $alpha = 1.0$. Each split is written once to Parquet shards and read back through DuckDB (Raasveldt and Mühleisen, 2019), so every run with the same seed and $alpha$ sees the same data. One extended study uses CIFAR-10 (Krizhevsky, 2009): 50,000 training and 10,000 test colour images of 32#sym.times\32 pixels in 10 classes, split the same way with $alpha = 0.5$.
 
 We measured the skew from the shards (seeds 0 to 4). A client holds on average #m.skew_a0p1_classes classes with at least 1% of its samples at $alpha = 0.1$, #m.skew_a0p5_classes at $alpha = 0.5$ and #m.skew_a1_classes at $alpha = 1.0$. Its largest class makes up on average #m.skew_a0p1_maxshare%, #m.skew_a0p5_maxshare% and #m.skew_a1_maxshare% of its data. For each class, our partitioner draws how that class is shared across clients. Hsu et al. (2019) instead draw a class mix for each client, so $alpha$ values are not directly comparable across papers. For the hyperparameter check only, 10,000 training images are held out as a validation set before partitioning.
 
@@ -266,6 +266,8 @@ Krizhevsky, A. (2009). Learning multiple layers of features from tiny images. Te
 McMahan, B., Moore, E., Ramage, D., Hampson, S., & Agüera y Arcas, B. (2017). Communication-efficient learning of deep networks from decentralized data. _AISTATS 2017_, 1273--1282.
 
 Raasveldt, M., & Mühleisen, H. (2019). DuckDB: An embeddable analytical database. _SIGMOD 2019_, 1981--1984.
+
+Xiao, H., Rasul, K., & Vollgraf, R. (2017). Fashion-MNIST: A novel image dataset for benchmarking machine learning algorithms. _arXiv:1708.07747_.
 
 Xie, C., Koyejo, O., & Gupta, I. (2019). Fall of empires: Breaking Byzantine-tolerant SGD by inner product manipulation. _UAI 2019_, PMLR 115:261--270.
 
