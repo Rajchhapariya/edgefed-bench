@@ -1,7 +1,6 @@
 """Unit Test Suite for Config-Driven Grid Runner and DuckDB Persistence.
 """
 
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,6 +14,7 @@ from experiments.run_grid import (
     execute_single_run,
     generate_grid_configurations,
     init_database,
+    insert_run,
 )
 
 
@@ -25,8 +25,8 @@ class TestGridRunner(unittest.TestCase):
     def setUpClass(cls):
         cls.config_path = Path("experiments/config.yaml")
         cls.data_root = "data"
-        if not os.path.exists(os.path.join(cls.data_root, "test.parquet")):
-            initialize_storage_pipeline(data_root=cls.data_root, num_clients=20, alpha=0.5, seed=0)
+        # Skips the rebuild when seed-0 shards already exist.
+        initialize_storage_pipeline(data_root=cls.data_root, num_clients=20, alpha=0.5, seed=0)
         cls.store = EdgeStore(data_root=cls.data_root, seed=0)
         cls.x_test_raw, cls.y_test_raw = cls.store.get_test_data()
         cls.x_test_t = torch.from_numpy(cls.x_test_raw).float()
@@ -37,16 +37,15 @@ class TestGridRunner(unittest.TestCase):
         cls.store.close()
 
     def test_01_grid_generation_counts(self):
-        """Verify grid configurations generate exactly 280 main grid runs and 40 wrong-f runs."""
+        """Verify the grid has 56 runs per seed and wrong-f has 8 per seed (10 seeds)."""
         grid_runs, wrong_f_runs = generate_grid_configurations(self.config_path)
-        self.assertEqual(len(grid_runs), 280)
-        self.assertEqual(len(wrong_f_runs), 40)
+        self.assertEqual(len(grid_runs), 560)
+        self.assertEqual(len(wrong_f_runs), 80)
 
-        # Count clean vs attacked
         clean_runs = [r for r in grid_runs if r["attack"] == "none"]
         attacked_runs = [r for r in grid_runs if r["attack"] != "none"]
-        self.assertEqual(len(clean_runs), 40)
-        self.assertEqual(len(attacked_runs), 240)
+        self.assertEqual(len(clean_runs), 80)
+        self.assertEqual(len(attacked_runs), 480)
 
     def test_02_config_hash_determinism(self):
         """Verify compute_config_hash yields exact same hash across independent calls."""
@@ -102,38 +101,17 @@ class TestGridRunner(unittest.TestCase):
             self.assertEqual(len(round_records), 2)
 
             chash = compute_config_hash(test_cfg)
-            con.execute("INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
-                chash,
-                test_cfg["experiment_type"],
-                test_cfg["aggregator"],
-                test_cfg["attack"],
-                test_cfg["attacker_share"],
-                test_cfg["actual_f"],
-                test_cfg["assumed_f"],
-                test_cfg["wire_precision"],
-                test_cfg["seed"],
-                test_cfg["num_rounds"],
-                test_cfg["num_clients"],
-                summary["final_accuracy"],
-                summary["best_accuracy"],
-                summary["final_loss"],
-                summary["acc_round_10"],
-                summary["acc_round_25"],
-                summary["acc_round_50"],
-                summary["rounds_to_70"],
-                summary["total_uplink_bytes"],
-                summary["bytes_per_client_round"],
-                summary["wall_clock_sec"],
-                summary["attacker_rejection_rate"],
-                summary["honest_false_rejection_rate"],
-                summary["completed_at"],
-            ])
+            insert_run(con, chash, test_cfg, summary, round_records)
 
             row_count = con.execute("SELECT count(*) FROM runs").fetchone()[0]
             self.assertEqual(row_count, 1)
 
             rounds_count = con.execute("SELECT count(*) FROM round_metrics").fetchone()[0]
-            self.assertEqual(rounds_count, 0)
+            self.assertEqual(rounds_count, 2)
+            mech_count = con.execute("SELECT count(*) FROM round_mechanism").fetchone()[0]
+            self.assertEqual(mech_count, 2)
+            threads = con.execute("SELECT torch_threads FROM runs").fetchone()[0]
+            self.assertEqual(threads, torch.get_num_threads())
             con.close()
 
 

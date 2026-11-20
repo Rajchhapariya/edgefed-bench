@@ -1,0 +1,35 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # The CPU-only PyTorch index keeps the install small; versions come from requirements.txt.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+
+      # Fashion-MNIST is downloaded on the first run and cached between runs.
+      - uses: actions/cache@v4
+        with:
+          path: data/cache
+          key: fashion-mnist-v1
+
+      - name: Run tests
+        run: python -m unittest discover tests -v
+
+      - name: Check config hashes and run counts
+        run: python experiments/run_grid.py --experiment everything --dry_run

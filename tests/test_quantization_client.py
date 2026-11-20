@@ -6,14 +6,14 @@ import torch
 
 from engine.quantization import Int8Quantizer
 from engine.client import EdgeClassifier, EdgeClient
-from engine.storage import EdgeStore
+from engine.storage import EdgeStore, initialize_storage_pipeline
 
 
 class TestQuantizationAndClient(unittest.TestCase):
     """Tests verifying INT8 bounds, quantization noise, and edge training."""
 
     def test_01_quantize_dequantize_bounds(self):
-        """Verify INT8 quantization produces int8 types within [-127, 127] and strictly bounded error."""
+        """Verify INT8 output is int8 in [-127, 127] and the error stays within S / 2."""
         rng = np.random.default_rng(1234)
         for size in [100, 1000, 101770]:
             tensor = rng.normal(loc=0.0, scale=0.5, size=size).astype(np.float32)
@@ -98,11 +98,12 @@ class TestQuantizationAndClient(unittest.TestCase):
 
     def test_06_edge_client_training_unquantized_and_quantized(self):
         """Verify client training rounds produce valid parameter deltas and payload telemetry."""
+        # On a fresh clone the default-seed shards may not exist yet.
+        initialize_storage_pipeline(data_root="data", num_clients=20, alpha=0.5)
         store = EdgeStore(data_root="data")
         client = EdgeClient(client_id=0, store=store, lr=0.01, batch_size=128, local_epochs=1)
         global_params = client.model.get_flat_parameters()
 
-        # Baseline unquantized training round
         update_fp32 = client.train_round(global_params, quantize=False)
         self.assertFalse(update_fp32.quantized)
         self.assertEqual(len(update_fp32.update), 101770)
@@ -111,7 +112,6 @@ class TestQuantizationAndClient(unittest.TestCase):
         self.assertGreater(update_fp32.local_loss, 0.0)
         self.assertIsNone(update_fp32.noise_metrics)
 
-        # Quantized training round evaluation
         update_int8 = client.train_round(global_params, quantize=True)
         self.assertTrue(update_int8.quantized)
         self.assertEqual(len(update_int8.update), 101770)

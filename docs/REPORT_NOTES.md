@@ -1,14 +1,23 @@
-# Report Implementation Notes: Template Architecture & Typst Sandboxing
+# Report Notes: Report Layout
 
-## 1. External Template Import vs. Self-Contained Document
+## Version 2.1: standard paper layout
 
-The repository's build specification mentions reusing the general template at `C:\Users\Rajch\Desktop\Research\templates\report_template.typ`. In `report/edgefed_bench_v2.typ`, the styling and component semantics (`stat-card`, `callout`, header banners, dual-column headers and footers) are retained in a self-contained Typst document rather than an external `#import` for the following structural reasons:
+`report/edgefed_bench_v2.typ` now uses a plain research-paper layout instead of the shared template's dashboard style. The stat cards, coloured callouts and dark title banner are gone. In their place:
 
-1. **Typst Root Sandbox Isolation:**
-   Typst 0.15 enforces strict filesystem sandboxing. Compiling from within the standalone repository (`typst compile report/edgefed_bench_v2.typ report/edgefed_bench_v2.pdf`) prohibits references to paths outside the repository root. An external `#import "../../../templates/report_template.typ"` causes a fatal compilation error (`path would escape the project root`). A standalone repository must remain fully compilable on any machine without external host dependencies.
+- A centred title, author line, abstract and keywords.
+- New Computer Modern at 10 pt, justified paragraphs, A4 with 2.3 cm side margins.
+- Numbered sections and cross-references (for example "Section 3.3", "Table 5").
+- Numbered table captions above each table and figure captions below each figure.
+- Tables with horizontal rules only (top, under the header, bottom) and no shading.
+- Figures without in-figure titles and with serif labels; the caption carries the description.
+- Author-year citations with an alphabetical reference list, and the reproduction steps in an appendix.
 
-2. **Strict Four-Page Layout Budget:**
-   The generic template defines default margins of 1.6cm vertical and 1.8cm horizontal with 9.5pt text size and 0.58em leading. When combined with the four empirical tables (Tables 1, 2, 3, and 4), two high-resolution vector figures, and five technical sections mandated by the build spec, the generic layout causes page overflow into a 5th page. The report's calibrated margins (1.4cm top/bottom, 1.6cm left/right) and 8.8pt font size allow the complete technical content to fit into exactly 4 pages without truncating tables, figures, or prose.
+The report is 13 pages. The first version was 4 pages; version 2.1 adds the statistics, the mechanism measurements and eight extended studies.
 
-3. **Database-Driven Metric Injection:**
-   All quantitative claims in prose, stat-cards, and callouts are dynamically bound to `report/metrics.typ` (generated from `results/results.duckdb` via `experiments/make_report_assets.py`). The customized structure ensures zero manual numerical entry while maintaining complete mathematical fidelity.
+## Why the report does not import the shared template
+
+The build specification asks the report to reuse the shared template at `C:\Users\Rajch\Desktop\Research\templates\report_template.typ`. Typst 0.15 does not let a document read files outside the project root: an `#import "../../../templates/report_template.typ"` fails with `path would escape the project root`. Keeping the styling inside the repository also means the report compiles on any machine that has the repository.
+
+## Numbers come from generated files
+
+Every number in the report prose is read from `report/metrics.typ`, and every table from `report/tables.typ`. Both are written by `experiments/make_report_assets.py` from `results/results.duckdb`, so no number is typed by hand.

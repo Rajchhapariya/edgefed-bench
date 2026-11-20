@@ -1,14 +1,13 @@
-"""EdgeFed-Bench: Benchmark Orchestrator and Simulation Runner.
+"""Quick check: four short regimes on one seed.
 
-Executes a grid of controlled experimental regimes:
-1. Baseline FedAvg (Honest clients, Float32).
-2. Poisoned FedAvg (Byzantine attackers, Float32).
-3. Defended Multi-Krum (Byzantine attackers, Float32).
-4. Quantized Defended Multi-Krum (Byzantine attackers, INT8 Quantized).
-5. Defended Coordinate-Median.
-6. Defended Trimmed-Mean.
+1. FedAvg, no attackers, Float32.
+2. FedAvg, 20% attackers, Float32.
+3. Multi-Krum, 20% attackers, Float32.
+4. Multi-Krum, 20% attackers, INT8.
 
-Logs telemetry to DuckDB and outputs a comparative benchmark summary.
+run_regime also accepts coordinate median and trimmed mean. Telemetry goes to
+data/telemetry.duckdb. The published results come from experiments/run_grid.py, not
+from this script.
 """
 
 from __future__ import annotations
@@ -35,7 +34,7 @@ def evaluate_global_model(
     y_test: np.ndarray,
     batch_size: int = 512,
 ) -> Tuple[float, float]:
-    """Evaluates the global model on the central test Parquet partition."""
+    """Returns (accuracy %, mean loss) on the test set."""
     model.eval()
     criterion = nn.CrossEntropyLoss()
 
@@ -79,7 +78,7 @@ def run_regime(
     attack_type: str = "sign_flip",
     seed: int = 42,
 ) -> Dict[str, Any]:
-    """Runs a single controlled federated learning regime."""
+    """Runs one regime and returns its summary."""
     print(f"\n========================================================")
     print(f"Starting: {regime_name}")
     print(f"Aggregation: {aggregation_method} | Byzantine: {byzantine_ratio*100:.0f}% | Quantized: {quantize}")
@@ -117,7 +116,6 @@ def run_regime(
         round_start_time = time.time()
         current_weights = global_model.get_flat_parameters()
 
-        # Local client edge training
         client_updates = []
         for client in clients:
             upd = client.train_round(
@@ -142,10 +140,8 @@ def run_regime(
                 local_loss=upd.local_loss,
             )
 
-        # Parameter update vector extraction
         raw_vectors = [u.update for u in client_updates]
 
-        # Byzantine adversarial corruption
         if num_byzantine > 0:
             corrupted_vectors, _ = ByzantineAdversary.corrupt_client_updates(
                 raw_vectors,
@@ -153,11 +149,11 @@ def run_regime(
                 attack_type=attack_type,
                 scaling_factor=2.5,
                 seed=(seed * 10_000) + (round_num * 100),
+                wire_int8=quantize,
             )
         else:
             corrupted_vectors = raw_vectors
 
-        # Server-side robust aggregation
         if aggregation_method == "FedAvg":
             aggregated_vector = RobustAggregator.fed_avg(corrupted_vectors)
         elif aggregation_method == "Multi-Krum":
@@ -166,32 +162,26 @@ def run_regime(
                 num_byzantine=num_byzantine,
                 m_candidates=num_clients - num_byzantine,
             )
-            # Track mitigation success: did Multi-Krum reject all Byzantine nodes?
+            # A round counts as mitigated only if Multi-Krum selected no attacker.
             mitigation_eval_rounds += 1
             attackers_in_selection = set(selected_indices).intersection(set(byzantine_ids))
             if len(attackers_in_selection) == 0:
                 successful_mitigations += 1
+        # Coordinate median and trimmed mean act per coordinate and never select or
+        # reject whole clients, so a per-client mitigation rate is not defined for them.
         elif aggregation_method in ("Coordinate-Median", "Median"):
             aggregated_vector = RobustAggregator.coordinate_median(corrupted_vectors)
-            mitigation_eval_rounds += 1
-            if np.all(np.isfinite(aggregated_vector)):
-                successful_mitigations += 1
         elif aggregation_method in ("Trimmed-Mean", "TrimmedMean", "Trimmed_Mean"):
             aggregated_vector = RobustAggregator.trimmed_mean(
                 corrupted_vectors,
                 num_byzantine=num_byzantine,
             )
-            mitigation_eval_rounds += 1
-            if np.all(np.isfinite(aggregated_vector)):
-                successful_mitigations += 1
         else:
             raise ValueError(f"Unknown aggregation method: {aggregation_method}")
 
-        # Model parameter update: w_{t+1} = w_t + v_agg
         new_weights = current_weights + aggregated_vector
         global_model.set_flat_parameters(new_weights)
 
-        # Global evaluation on held-out test partition
         acc, test_loss = evaluate_global_model(global_model, x_test, y_test)
         history_accuracy.append(acc)
         history_loss.append(test_loss)
@@ -215,10 +205,12 @@ def run_regime(
             f"Duration: {duration:.2f}s"
         )
 
+    # Mitigation rate: share of rounds in which Multi-Krum selected no Byzantine client.
+    # None when it is not defined (no attackers, or an aggregator that does not select clients).
     mitigation_rate = (
-        (successful_mitigations / max(mitigation_eval_rounds, 1)) * 100.0
-        if num_byzantine > 0
-        else 100.0
+        (successful_mitigations / mitigation_eval_rounds) * 100.0
+        if num_byzantine > 0 and mitigation_eval_rounds > 0
+        else None
     )
 
     return {
@@ -263,28 +255,22 @@ def main():
     print("==================================================================")
     print(f"Configuration: {args.clients} clients, alpha={args.alpha}, rounds={args.rounds}, attack={args.attack_type}, seed={args.seed}")
 
-    client_shards_dir = os.path.join(args.data_root, "clients")
-    if (
-        args.force_rebuild
-        or not os.path.exists(client_shards_dir)
-        or len(os.listdir(client_shards_dir)) < args.clients
-    ):
-        print("[!] Initializing storage pipeline...")
-        initialize_storage_pipeline(
-            data_root=args.data_root,
-            num_clients=args.clients,
-            alpha=args.alpha,
-            seed=args.seed,
-            force_rebuild=args.force_rebuild,
-        )
+    # Reuses shards only if they were built with this seed, alpha and client count.
+    initialize_storage_pipeline(
+        data_root=args.data_root,
+        num_clients=args.clients,
+        alpha=args.alpha,
+        seed=args.seed,
+        force_rebuild=args.force_rebuild,
+    )
 
-    store = EdgeStore(data_root=args.data_root)
+    store = EdgeStore(data_root=args.data_root, seed=args.seed)
     x_test, y_test = store.get_test_data()
 
     exp_id = f"exp_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     telemetry = TelemetryEngine(db_path=os.path.join(args.data_root, "telemetry.duckdb"))
 
-    # Initial model weights for fair cross-regime evaluation
+    # All regimes start from the same weights so they can be compared.
     torch.manual_seed(args.seed)
     initial_model = EdgeClassifier()
     initial_weights = initial_model.get_flat_parameters()
@@ -358,7 +344,7 @@ def main():
             f"{r['final_accuracy']:>8.2f}% | "
             f"{r['payload_per_client_kb']:>9.1f} | "
             f"{r['total_payload_mb']:>8.2f} | "
-            f"{r['mitigation_rate']:>9.1f}%"
+            + (f"{r['mitigation_rate']:>9.1f}%" if r["mitigation_rate"] is not None else f"{'n/a':>10}")
         )
         print(row)
     print("=" * 105)

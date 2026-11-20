@@ -12,6 +12,7 @@ data/clients*/
 data/clients_*
 data/*.parquet
 data/*.duckdb
+data/cifar10/
 *.duckdb
 *.duckdb.wal
 *.duckdb.tmp

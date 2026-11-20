@@ -17,8 +17,9 @@ class TestSimulationEngine(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.data_root = "data"
-        if not os.path.exists(os.path.join(cls.data_root, "test.parquet")):
-            initialize_storage_pipeline(data_root=cls.data_root, num_clients=20, alpha=0.5)
+        # Skips the rebuild when the default-seed shards already exist. Checking only for
+        # test.parquet is not enough: another test module may have built it for seed 0.
+        initialize_storage_pipeline(data_root=cls.data_root, num_clients=20, alpha=0.5)
         cls.store = EdgeStore(data_root=cls.data_root)
         cls.x_test, cls.y_test = cls.store.get_test_data()
         cls.telemetry = TelemetryEngine(db_path=os.path.join(cls.data_root, "telemetry.duckdb"))
@@ -121,7 +122,8 @@ class TestSimulationEngine(unittest.TestCase):
 
         self.assertEqual(result["regime_name"], "Smoke_Test_Coordinate_Median")
         self.assertGreater(result["final_accuracy"], 0.0)
-        self.assertEqual(result["mitigation_rate"], 100.0)
+        # Coordinate median does not select clients, so no mitigation rate is defined.
+        self.assertIsNone(result["mitigation_rate"])
 
     def test_05_seed_determinism_exact_match(self):
         """Verify two independent runs with identical config and seed give exact matching accuracy."""
@@ -130,7 +132,6 @@ class TestSimulationEngine(unittest.TestCase):
         num_clients = 5
         byzantine_ratio = 0.20
 
-        # Run 1
         torch.manual_seed(seed)
         np.random.seed(seed)
         model_1 = EdgeClassifier()
@@ -155,7 +156,6 @@ class TestSimulationEngine(unittest.TestCase):
             seed=seed,
         )
 
-        # Run 2
         torch.manual_seed(seed)
         np.random.seed(seed)
         model_2 = EdgeClassifier()
@@ -180,7 +180,6 @@ class TestSimulationEngine(unittest.TestCase):
             seed=seed,
         )
 
-        # Exact match assertion on CPU
         self.assertEqual(res_1["final_accuracy"], res_2["final_accuracy"])
         self.assertAlmostEqual(res_1["final_loss"], res_2["final_loss"], places=7)
 
