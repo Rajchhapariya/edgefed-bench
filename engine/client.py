@@ -75,11 +75,42 @@ class EdgeCNN(FlatParamsMixin, nn.Module):
         return self.fc2(self.relu(self.fc1(x.flatten(1))))
 
 
-MODELS = {"mlp": EdgeClassifier, "cnn": EdgeCNN}
+class EdgeCIFARCNN(FlatParamsMixin, nn.Module):
+    """Small CNN for 32x32 RGB CIFAR-10 images (30,138 parameters).
+
+    conv 5x5 (8) -> max-pool -> conv 5x5 (16) -> max-pool -> fc 64 -> fc 10, the same
+    shape as EdgeCNN with three input channels. Inputs arrive flattened to 3,072 values
+    in channel-first order, scaled to [0, 1]. They are reshaped and normalised per channel
+    here with the usual CIFAR-10 training-set means and standard deviations.
+    """
+
+    MEAN = (0.4914, 0.4822, 0.4465)
+    STD = (0.2470, 0.2435, 0.2616)
+
+    def __init__(self, num_classes: int = 10):
+        super().__init__()
+        self.conv1 = nn.Conv2d(3, 8, kernel_size=5)
+        self.conv2 = nn.Conv2d(8, 16, kernel_size=5)
+        self.pool = nn.MaxPool2d(2)
+        self.relu = nn.ReLU()
+        self.fc1 = nn.Linear(16 * 5 * 5, 64)
+        self.fc2 = nn.Linear(64, num_classes)
+        # Buffers, not parameters: they are never trained or sent as part of an update.
+        self.register_buffer("mean", torch.tensor(self.MEAN).view(1, 3, 1, 1), persistent=False)
+        self.register_buffer("std", torch.tensor(self.STD).view(1, 3, 1, 1), persistent=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = (x.view(-1, 3, 32, 32) - self.mean) / self.std
+        x = self.pool(self.relu(self.conv1(x)))
+        x = self.pool(self.relu(self.conv2(x)))
+        return self.fc2(self.relu(self.fc1(x.flatten(1))))
+
+
+MODELS = {"mlp": EdgeClassifier, "cnn": EdgeCNN, "cnn_cifar": EdgeCIFARCNN}
 
 
 def build_model(name: str = "mlp") -> nn.Module:
-    """Returns a fresh model by name ("mlp" or "cnn")."""
+    """Returns a fresh model by name ("mlp", "cnn" or "cnn_cifar")."""
     if name not in MODELS:
         raise ValueError(f"Unknown model: {name}. Choose from {sorted(MODELS)}.")
     return MODELS[name]()

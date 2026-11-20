@@ -208,24 +208,44 @@
   [Trimmed mean], [ALIE 20%], [84.18 +- 0.60], [84.34 +- 0.57], [+0.16],
 )
 
-#let table_long = table(
-  columns: (1.5fr, 1fr, 0.8fr, 0.9fr, 0.9fr, 0.9fr, 1.1fr),
+#let table_cifar = table(
+  columns: (1.6fr, 1.2fr, 1.4fr, 1.4fr, 0.8fr),
   fill: none,
   stroke: (x, y) => if y == 0 { (top: 0.8pt, bottom: 0.4pt) },
   inset: 3.5pt,
-  [*Aggregator*], [*Setting*], [*Wire*], [*Round 50*], [*Round 100*], [*Round 150*], [*Gain 50 to 150*],
-  [Multi-Krum], [clean], [Float32], [85.38], [86.84], [87.52], [+2.14],
-  [Multi-Krum], [clean], [INT8], [85.32], [86.85], [87.50], [+2.18],
-  [Multi-Krum], [sign-flip 20%], [Float32], [84.89], [86.31], [87.09], [+2.20],
-  [Multi-Krum], [sign-flip 20%], [INT8], [84.87], [86.34], [87.11], [+2.23],
-  [Coordinate median], [clean], [Float32], [84.72], [86.33], [86.86], [+2.14],
-  [Coordinate median], [clean], [INT8], [84.61], [86.07], [86.72], [+2.11],
-  [Coordinate median], [sign-flip 20%], [Float32], [83.17], [84.47], [85.03], [+1.85],
-  [Coordinate median], [sign-flip 20%], [INT8], [83.06], [84.21], [84.72], [+1.66],
-  [Trimmed mean], [clean], [Float32], [85.35], [86.87], [87.53], [+2.18],
-  [Trimmed mean], [clean], [INT8], [85.33], [86.83], [87.51], [+2.18],
-  [Trimmed mean], [sign-flip 20%], [Float32], [83.00], [84.26], [85.03], [+2.03],
-  [Trimmed mean], [sign-flip 20%], [INT8], [83.00], [84.30], [85.01], [+2.01],
+  [*Aggregator*], [*Setting*], [*Float32*], [*INT8*], [*Diff*],
+  [FedAvg], [clean], [58.97 +- 0.91], [58.76 +- 1.01], [-0.21],
+  [FedAvg], [sign-flip 20%], [10.00 +- 0.00], [10.24 +- 0.40], [+0.24],
+  [FedAvg], [ALIE 20%], [56.75 +- 1.14], [56.53 +- 1.14], [-0.22],
+  [Multi-Krum], [clean], [58.66 +- 0.91], [58.78 +- 1.26], [+0.12],
+  [Multi-Krum], [sign-flip 20%], [56.66 +- 2.94], [56.83 +- 3.38], [+0.17],
+  [Multi-Krum], [ALIE 20%], [54.14 +- 1.95], [53.99 +- 1.98], [-0.14],
+  [Coordinate median], [clean], [55.49 +- 1.92], [54.75 +- 3.34], [-0.75],
+  [Coordinate median], [sign-flip 20%], [49.58 +- 3.77], [48.48 +- 4.11], [-1.10],
+  [Coordinate median], [ALIE 20%], [50.34 +- 3.92], [50.36 +- 3.06], [+0.01],
+  [Trimmed mean], [clean], [58.80 +- 0.95], [58.70 +- 1.44], [-0.09],
+  [Trimmed mean], [sign-flip 20%], [51.14 +- 3.28], [50.26 +- 3.21], [-0.88],
+  [Trimmed mean], [ALIE 20%], [54.01 +- 2.39], [53.30 +- 2.88], [-0.71],
+)
+
+#let table_long = table(
+  columns: (1.4fr, 1fr, 0.8fr, 0.8fr, 0.8fr, 0.8fr, 1fr, 1fr),
+  fill: none,
+  stroke: (x, y) => if y == 0 { (top: 0.8pt, bottom: 0.4pt) },
+  inset: 3.5pt,
+  [*Aggregator*], [*Setting*], [*Wire*], [*Round 50*], [*Round 100*], [*Round 150*], [*Gain 50 to 150*], [*Gain 100 to 150*],
+  [Multi-Krum], [clean], [Float32], [85.38], [86.84], [87.52], [+2.14], [+0.68],
+  [Multi-Krum], [clean], [INT8], [85.32], [86.85], [87.50], [+2.18], [+0.66],
+  [Multi-Krum], [sign-flip 20%], [Float32], [84.89], [86.31], [87.09], [+2.20], [+0.78],
+  [Multi-Krum], [sign-flip 20%], [INT8], [84.87], [86.34], [87.11], [+2.23], [+0.77],
+  [Coordinate median], [clean], [Float32], [84.72], [86.33], [86.86], [+2.14], [+0.54],
+  [Coordinate median], [clean], [INT8], [84.61], [86.07], [86.72], [+2.11], [+0.65],
+  [Coordinate median], [sign-flip 20%], [Float32], [83.17], [84.47], [85.03], [+1.85], [+0.56],
+  [Coordinate median], [sign-flip 20%], [INT8], [83.06], [84.21], [84.72], [+1.66], [+0.51],
+  [Trimmed mean], [clean], [Float32], [85.35], [86.87], [87.53], [+2.18], [+0.66],
+  [Trimmed mean], [clean], [INT8], [85.33], [86.83], [87.51], [+2.18], [+0.68],
+  [Trimmed mean], [sign-flip 20%], [Float32], [83.00], [84.26], [85.03], [+2.03], [+0.77],
+  [Trimmed mean], [sign-flip 20%], [INT8], [83.00], [84.30], [85.01], [+2.01], [+0.71],
 )
 
 #let table_tuning = table(
@@ -254,5 +274,25 @@
   [18], [0.02], [0], [128], [78.52 +- 0.22], [3],
   [19], [0.2], [0.9], [64], [75.23 +- 1.03], [3],
   [20], [0.01], [0], [128], [74.64 +- 0.29], [3],
+)
+
+#let table_tuned = table(
+  columns: (1.5fr, 1.1fr, 0.9fr, 0.9fr, 1.2fr, 1.2fr, 0.7fr, 0.6fr),
+  fill: none,
+  stroke: (x, y) => if y == 0 { (top: 0.8pt, bottom: 0.4pt) },
+  inset: 3.5pt,
+  [*Aggregator*], [*Setting*], [*Batch 128 Float32*], [*Batch 128 INT8*], [*Batch 64 Float32*], [*Batch 64 INT8*], [*Diff*], [*p*],
+  [FedAvg], [clean], [85.37], [85.30], [86.31 +- 0.15], [86.25 +- 0.18], [-0.07], [0.250],
+  [FedAvg], [sign-flip 20%], [40.51], [41.67], [46.05 +- 21.65], [46.50 +- 20.51], [+0.45], [0.812],
+  [FedAvg], [ALIE 20%], [85.21], [85.24], [85.99 +- 0.37], [86.11 +- 0.16], [+0.12], [0.375],
+  [Multi-Krum], [clean], [85.38], [85.35], [86.26 +- 0.15], [86.26 +- 0.24], [-0.01], [0.875],
+  [Multi-Krum], [sign-flip 20%], [84.89], [84.87], [85.87 +- 0.16], [85.91 +- 0.17], [+0.04], [0.625],
+  [Multi-Krum], [ALIE 20%], [84.56], [84.58], [85.26 +- 0.89], [85.46 +- 0.65], [+0.20], [0.250],
+  [Coordinate median], [clean], [84.77], [84.65], [85.44 +- 0.49], [85.36 +- 0.47], [-0.07], [0.125],
+  [Coordinate median], [sign-flip 20%], [83.21], [83.03], [84.05 +- 0.78], [83.67 +- 0.87], [-0.38], [0.062],
+  [Coordinate median], [ALIE 20%], [84.75], [84.63], [85.16 +- 0.69], [85.08 +- 0.72], [-0.08], [0.250],
+  [Trimmed mean], [clean], [85.39], [85.36], [86.25 +- 0.23], [86.28 +- 0.15], [+0.03], [0.562],
+  [Trimmed mean], [sign-flip 20%], [82.92], [83.01], [83.87 +- 0.53], [83.80 +- 0.48], [-0.07], [0.562],
+  [Trimmed mean], [ALIE 20%], [85.01], [84.88], [85.68 +- 0.48], [85.53 +- 0.48], [-0.15], [0.125],
 )
 

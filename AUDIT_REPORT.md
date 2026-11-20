@@ -134,10 +134,10 @@ Gaps from section 5:
 
 | Gap | Status |
 | :--- | :--- |
-| 1. Convergence | Checked with 150-round runs. Accuracy still rises after round 50 (by 1.66 to 2.23 points by round 150). The main grid stays at 50 rounds. |
+| 1. Convergence | Checked with 150-round runs. Accuracy still rises after round 50 (by 1.66 to 2.23 points by round 150, and by 0.51 to 0.78 over the last 50 rounds). The main grid stays at 50 rounds. |
 | 2. Statistics | 10 seeds, paired confidence intervals, exact permutation tests, Holm correction. |
-| 3. Scope | Added ALIE, IPM, alpha 0.1 and 1.0, INT4, 1-bit sign and a small CNN. No second dataset. |
-| 4. Methodology | Validation split added; the fixed hyperparameters rank 6 of 20 for clean FedAvg. Hyperparameter source: Not found in available documents. FedAvg stays unweighted. |
+| 3. Scope | Added ALIE, IPM, alpha 0.1 and 1.0, INT4, 1-bit sign, a small CNN and CIFAR-10 (3 seeds; INT8 differences up to 1.10 points, untested). |
+| 4. Methodology | Validation split added; the fixed hyperparameters rank 6 of 20 for clean FedAvg. A rerun at the best setting keeps robust-aggregator INT8 differences within 0.38 points. Hyperparameter source: Not found in available documents. FedAvg stays unweighted. |
 | 5. Related work | `docs/RELATED_WORK.md` and report Section 5. |
 | 6. Theory | The S/2 error bound is now compared with measured distances (report Section 3.6). No formal proof is added. |
 | 7. Reproducibility notes | Thread counts recorded per run; `results/ENVIRONMENT.md` updated. |

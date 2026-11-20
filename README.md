@@ -31,6 +31,8 @@ Quantizing updates to INT8 helps with the first problem, but it adds rounding er
 - **Strong label skew (alpha 0.1):** in clean runs, coordinate median with INT8 ends at 70.53%; INT8 minus Float32 is -3.12 points (5 seeds, p = 0.062, the smallest p possible with that many seeds).
 - **INT4 and 1-bit sign:** at 20% sign-flip, Multi-Krum keeps 83.23% with INT4 and 81.10% with Sign; coordinate median falls to 60.99% with INT4 but keeps 81.54% with Sign.
 - **Hyperparameters:** on a held-out validation split, our fixed setting ranks 6 of 20 for clean FedAvg, 1.09 points below the best (lr 0.05, momentum 0.9, batch 64).
+- **Rerun at the best setting (lr 0.05, momentum 0.9, batch 64):** Float32 accuracy rises by +0.41 to +0.98 points over batch 128 in every setting except FedAvg under sign-flip. The largest INT8 minus Float32 difference for a robust aggregator is 0.38 points (Coordinate median, sign-flip 20%); coordinate median is again lower with INT8 in 3 of 3 settings.
+- **CIFAR-10 (3 seeds, 50 rounds):** clean FedAvg reaches 58.97% with Float32. For the robust aggregators, INT8 minus Float32 exceeds 0.5 points in 4 of 9 settings (largest 1.10, Coordinate median, sign-flip 20%) and is negative in 6. With 3 seeds the smallest possible p is 0.25, so these differences are not tested.
 
 ## 3. Results by Configuration (50 Rounds, 20 Clients, $\alpha = 0.5$, 10 Seeds)
 
@@ -232,25 +234,43 @@ Final test accuracy of a 20,522-parameter CNN, mean +- standard deviation. This 
 | Trimmed mean | sign-flip 20% | 80.85 +- 1.35 | 80.67 +- 1.47 | -0.18 |
 | Trimmed mean | ALIE 20% | 84.18 +- 0.60 | 84.34 +- 0.57 | +0.16 |
 
-### 3.12. Longer Training: 150 Rounds
-Mean test accuracy over seeds 0 to 4 at rounds 50, 100 and 150.
+### 3.12. A Second Dataset: CIFAR-10
+Final test accuracy of a 30,138-parameter CNN on CIFAR-10 (20 clients, alpha 0.5), mean +- standard deviation. Diff is INT8 minus Float32, paired by seed. Fewer seeds and rounds than the MLP grid to limit CPU time.
 
-| Aggregator | Setting | Wire | Round 50 | Round 100 | Round 150 | Gain 50 to 150 |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| Multi-Krum | clean | Float32 | 85.38 | 86.84 | 87.52 | +2.14 |
-| Multi-Krum | clean | INT8 | 85.32 | 86.85 | 87.50 | +2.18 |
-| Multi-Krum | sign-flip 20% | Float32 | 84.89 | 86.31 | 87.09 | +2.20 |
-| Multi-Krum | sign-flip 20% | INT8 | 84.87 | 86.34 | 87.11 | +2.23 |
-| Coordinate median | clean | Float32 | 84.72 | 86.33 | 86.86 | +2.14 |
-| Coordinate median | clean | INT8 | 84.61 | 86.07 | 86.72 | +2.11 |
-| Coordinate median | sign-flip 20% | Float32 | 83.17 | 84.47 | 85.03 | +1.85 |
-| Coordinate median | sign-flip 20% | INT8 | 83.06 | 84.21 | 84.72 | +1.66 |
-| Trimmed mean | clean | Float32 | 85.35 | 86.87 | 87.53 | +2.18 |
-| Trimmed mean | clean | INT8 | 85.33 | 86.83 | 87.51 | +2.18 |
-| Trimmed mean | sign-flip 20% | Float32 | 83.00 | 84.26 | 85.03 | +2.03 |
-| Trimmed mean | sign-flip 20% | INT8 | 83.00 | 84.30 | 85.01 | +2.01 |
+| Aggregator | Setting | Float32 | INT8 | Diff |
+| :--- | :--- | :--- | :--- | :--- |
+| FedAvg | clean | 58.97 +- 0.91 | 58.76 +- 1.01 | -0.21 |
+| FedAvg | sign-flip 20% | 10.00 +- 0.00 | 10.24 +- 0.40 | +0.24 |
+| FedAvg | ALIE 20% | 56.75 +- 1.14 | 56.53 +- 1.14 | -0.22 |
+| Multi-Krum | clean | 58.66 +- 0.91 | 58.78 +- 1.26 | +0.12 |
+| Multi-Krum | sign-flip 20% | 56.66 +- 2.94 | 56.83 +- 3.38 | +0.17 |
+| Multi-Krum | ALIE 20% | 54.14 +- 1.95 | 53.99 +- 1.98 | -0.14 |
+| Coordinate median | clean | 55.49 +- 1.92 | 54.75 +- 3.34 | -0.75 |
+| Coordinate median | sign-flip 20% | 49.58 +- 3.77 | 48.48 +- 4.11 | -1.10 |
+| Coordinate median | ALIE 20% | 50.34 +- 3.92 | 50.36 +- 3.06 | +0.01 |
+| Trimmed mean | clean | 58.80 +- 0.95 | 58.70 +- 1.44 | -0.09 |
+| Trimmed mean | sign-flip 20% | 51.14 +- 3.28 | 50.26 +- 3.21 | -0.88 |
+| Trimmed mean | ALIE 20% | 54.01 +- 2.39 | 53.30 +- 2.88 | -0.71 |
 
-### 3.13. Hyperparameter Check on a Validation Split
+### 3.13. Longer Training: 150 Rounds
+Mean test accuracy over seeds 0 to 4 at rounds 50, 100 and 150, and the gain over the last 50 rounds as a convergence check.
+
+| Aggregator | Setting | Wire | Round 50 | Round 100 | Round 150 | Gain 50 to 150 | Gain 100 to 150 |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Multi-Krum | clean | Float32 | 85.38 | 86.84 | 87.52 | +2.14 | +0.68 |
+| Multi-Krum | clean | INT8 | 85.32 | 86.85 | 87.50 | +2.18 | +0.66 |
+| Multi-Krum | sign-flip 20% | Float32 | 84.89 | 86.31 | 87.09 | +2.20 | +0.78 |
+| Multi-Krum | sign-flip 20% | INT8 | 84.87 | 86.34 | 87.11 | +2.23 | +0.77 |
+| Coordinate median | clean | Float32 | 84.72 | 86.33 | 86.86 | +2.14 | +0.54 |
+| Coordinate median | clean | INT8 | 84.61 | 86.07 | 86.72 | +2.11 | +0.65 |
+| Coordinate median | sign-flip 20% | Float32 | 83.17 | 84.47 | 85.03 | +1.85 | +0.56 |
+| Coordinate median | sign-flip 20% | INT8 | 83.06 | 84.21 | 84.72 | +1.66 | +0.51 |
+| Trimmed mean | clean | Float32 | 85.35 | 86.87 | 87.53 | +2.18 | +0.66 |
+| Trimmed mean | clean | INT8 | 85.33 | 86.83 | 87.51 | +2.18 | +0.68 |
+| Trimmed mean | sign-flip 20% | Float32 | 83.00 | 84.26 | 85.03 | +2.03 | +0.77 |
+| Trimmed mean | sign-flip 20% | INT8 | 83.00 | 84.30 | 85.01 | +2.01 | +0.71 |
+
+### 3.14. Hyperparameter Check on a Validation Split
 Clean FedAvg, Float32. 10,000 training images are held out as a validation set before partitioning; accuracy here is validation accuracy, not test accuracy.
 
 | Rank | lr | Momentum | Batch | Validation acc | Seeds |
@@ -275,6 +295,24 @@ Clean FedAvg, Float32. 10,000 training images are held out as a validation set b
 | 18 | 0.02 | 0 | 128 | 78.52 +- 0.22 | 3 |
 | 19 | 0.2 | 0.9 | 64 | 75.23 +- 1.03 | 3 |
 | 20 | 0.01 | 0 | 128 | 74.64 +- 0.29 | 3 |
+
+### 3.15. Rerun at the Best Validation Setting
+MLP, alpha 0.5, seeds 0 to 4. Batch 128 columns are the means of the matching main-grid and ALIE runs; the other columns rerun the same settings at the best setting from Section 3.14. Diff is INT8 minus Float32 at the new setting, paired by seed; p is the exact permutation p-value.
+
+| Aggregator | Setting | Batch 128 Float32 | Batch 128 INT8 | Batch 64 Float32 | Batch 64 INT8 | Diff | p |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| FedAvg | clean | 85.37 | 85.30 | 86.31 +- 0.15 | 86.25 +- 0.18 | -0.07 | 0.250 |
+| FedAvg | sign-flip 20% | 40.51 | 41.67 | 46.05 +- 21.65 | 46.50 +- 20.51 | +0.45 | 0.812 |
+| FedAvg | ALIE 20% | 85.21 | 85.24 | 85.99 +- 0.37 | 86.11 +- 0.16 | +0.12 | 0.375 |
+| Multi-Krum | clean | 85.38 | 85.35 | 86.26 +- 0.15 | 86.26 +- 0.24 | -0.01 | 0.875 |
+| Multi-Krum | sign-flip 20% | 84.89 | 84.87 | 85.87 +- 0.16 | 85.91 +- 0.17 | +0.04 | 0.625 |
+| Multi-Krum | ALIE 20% | 84.56 | 84.58 | 85.26 +- 0.89 | 85.46 +- 0.65 | +0.20 | 0.250 |
+| Coordinate median | clean | 84.77 | 84.65 | 85.44 +- 0.49 | 85.36 +- 0.47 | -0.07 | 0.125 |
+| Coordinate median | sign-flip 20% | 83.21 | 83.03 | 84.05 +- 0.78 | 83.67 +- 0.87 | -0.38 | 0.062 |
+| Coordinate median | ALIE 20% | 84.75 | 84.63 | 85.16 +- 0.69 | 85.08 +- 0.72 | -0.08 | 0.250 |
+| Trimmed mean | clean | 85.39 | 85.36 | 86.25 +- 0.23 | 86.28 +- 0.15 | +0.03 | 0.562 |
+| Trimmed mean | sign-flip 20% | 82.92 | 83.01 | 83.87 +- 0.53 | 83.80 +- 0.48 | -0.07 | 0.562 |
+| Trimmed mean | ALIE 20% | 85.01 | 84.88 | 85.68 +- 0.48 | 85.53 +- 0.48 | -0.15 | 0.125 |
 
 <!-- RESULTS:END -->
 
@@ -347,11 +385,11 @@ For $N$ client updates $\{\mathbf{v}_1, \dots, \mathbf{v}_N\}$ and an assumed nu
 ## 6. Limitations
 
 1. **One machine.** All clients run as a simulation on one computer, not on edge hardware such as a Raspberry Pi or Jetson. Network delay, packet loss and thermal throttling are not modelled.
-2. **One dataset, two small models.** Everything uses Fashion-MNIST. The main model is a 101,770-parameter MLP; Section 3.11 adds a 20,522-parameter CNN with fewer seeds and rounds. Larger networks or other datasets may behave differently.
-3. **Seeds.** The main grid and the wrong-f experiment use 10 seeds; the extended experiments use 5 (the CNN uses 3). The equivalence margin in Section 3.6 was chosen after seeing seeds 0 to 4, so seeds 5 to 9 serve as the confirmation.
+2. **Two small datasets, small models.** The main grid uses Fashion-MNIST and a 101,770-parameter MLP. Section 3.11 adds a 20,522-parameter CNN, and Section 3.12 a 30,138-parameter CNN on CIFAR-10, both with fewer seeds. Larger networks or other datasets may behave differently.
+3. **Seeds.** The main grid and the wrong-f experiment use 10 seeds; the extended experiments use 5 (the two CNN studies use 3). The equivalence margin in Section 3.6 was chosen after seeing seeds 0 to 4, so seeds 5 to 9 serve as the confirmation.
 4. **The server knows f.** Outside the wrong-f experiment, the aggregator is given the true number of attackers.
 5. **Omniscient strong attacks.** ALIE and IPM attackers see every client's true update in the round. That is the strongest version of these attacks, not the most realistic one.
-6. **Hyperparameters.** Learning rate, momentum and batch size were fixed before this study. Section 3.13 checks them on a held-out validation split for clean FedAvg only, not for every aggregator and attack.
+6. **Hyperparameters.** Learning rate, momentum and batch size were fixed before this study. Section 3.14 checks them on a held-out validation split for clean FedAvg only, and Section 3.15 reruns the key scenarios at the best setting found there. They were not tuned for each aggregator and attack.
 7. **No error feedback, no differential privacy.** The INT4 and sign formats are used without error feedback, which the compression literature uses to recover accuracy. We add no clipping or privacy noise.
 8. **`simulate.py` is a quick check.** It defaults to 5 rounds; its numbers are not the published results.
 
@@ -375,11 +413,11 @@ pip install -r requirements.txt
 python -m unittest discover tests -v
 ```
 
-The tests cover storage and partitioning, the validation split, every wire format, all four attacks, all four aggregators, both models, the simulation loop, the runner and merger, and the statistics. Some tests build shards under `data/` and download Fashion-MNIST the first time.
+The tests cover storage and partitioning, the validation split, every wire format, all four attacks, all four aggregators, both models, the simulation loop, the runner and merger, and the statistics. Some tests build shards under `data/` and download Fashion-MNIST the first time. The CIFAR-10 experiment downloads CIFAR-10 (about 170 MB) into `data/cifar10/` the first time it runs.
 
 ### 7.3. Running the Experiments
 
-`experiments/config.yaml` defines 1,432 runs: the main grid (560), wrong-f (80), and six extended experiments. Each finished run is stored under a config hash, so a stopped job resumes where it left off. Runs are bit-for-bit repeatable on the same machine at the same PyTorch thread count; each run's thread count is stored in the `torch_threads` column.
+`experiments/config.yaml` defines 1,624 runs: the main grid (560), wrong-f (80), and eight extended experiments. Each finished run is stored under a config hash, so a stopped job resumes where it left off. Runs are bit-for-bit repeatable on the same machine at the same PyTorch thread count; each run's thread count is stored in the `torch_threads` column.
 
 Single process:
 

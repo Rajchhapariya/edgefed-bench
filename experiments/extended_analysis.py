@@ -272,7 +272,9 @@ def alpha_sweep(data: Data, m: Dict[str, str]) -> Optional[Tuple[str, str]]:
         return None
     skew = {a: (c, s) for a, c, s in data.con.execute("""
         SELECT dirichlet_alpha, avg(classes_present), avg(max_class_share)
-        FROM partition_stats WHERE validation_size = 0 AND seed BETWEEN 0 AND 4 GROUP BY 1""").fetchall()} \
+        FROM partition_stats WHERE validation_size = 0 AND seed BETWEEN 0 AND 4""" + (
+        " AND dataset = 'fashion_mnist'" if "dataset" in [r[0] for r in data.con.execute(
+            "DESCRIBE partition_stats").fetchall()] else "") + " GROUP BY 1").fetchall()} \
         if _has_table(data.con, "partition_stats") else {}
     for a, (c, s) in skew.items():
         m[f"skew_a{a:g}_classes".replace(".", "p")] = f"{c:.1f}"
@@ -385,7 +387,7 @@ def long_run(data: Data, m: Dict[str, str]) -> Optional[Tuple[str, str]]:
     if not data.count("long_run"):
         return None
     rows = []
-    gains = []
+    gains, late = [], []
     for agg in ROBUST:
         for atk, share in (("none", 0.0), ("sign-flip", 0.2)):
             for prec in ("Float32", "INT8"):
@@ -400,12 +402,15 @@ def long_run(data: Data, m: Dict[str, str]) -> Optional[Tuple[str, str]]:
                 if 150 not in at:
                     continue
                 gains.append(at[150] - at[50])
+                late.append(at[150] - at[100])
                 rows.append([agg, _scen(atk, share), prec, _fmt(at.get(50)), _fmt(at.get(100)),
-                             _fmt(at[150]), f"{at[150] - at[50]:+.2f}"])
+                             _fmt(at[150]), f"{at[150] - at[50]:+.2f}", f"{at[150] - at[100]:+.2f}"])
     if not rows:
         return None
     m["long_gain_min"] = f"{min(gains):+.2f}"
     m["long_gain_max"] = f"{max(gains):+.2f}"
+    m["long_late_min"] = f"{min(late):+.2f}"
+    m["long_late_max"] = f"{max(late):+.2f}"
     # INT8 minus Float32 at round 150, paired by seed, Multi-Krum under sign-flip.
     for agg in ROBUST:
         base = (f"experiment_type='long_run' AND aggregator='{agg}' AND attack='sign-flip'")
@@ -414,8 +419,8 @@ def long_run(data: Data, m: Dict[str, str]) -> Optional[Tuple[str, str]]:
         if res:
             m[f"long_diff_{agg.split()[0].lower().replace('-', '')}"] = f"{res['mean_diff']:+.2f}"
     return _tables("table_long", ["Aggregator", "Setting", "Wire", "Round 50", "Round 100",
-                                  "Round 150", "Gain 50 to 150"], rows,
-                   "1.5fr, 1fr, 0.8fr, 0.9fr, 0.9fr, 0.9fr, 1.1fr")
+                                  "Round 150", "Gain 50 to 150", "Gain 100 to 150"], rows,
+                   "1.4fr, 1fr, 0.8fr, 0.8fr, 0.8fr, 0.8fr, 1fr, 1fr")
 
 
 def tuning(data: Data, m: Dict[str, str]) -> Optional[Tuple[str, str]]:
@@ -438,6 +443,117 @@ def tuning(data: Data, m: Dict[str, str]) -> Optional[Tuple[str, str]]:
         m["tune_gap"] = f"{best[3] - float(m['tune_default_acc']):.2f}"
     return _tables("table_tuning", ["Rank", "lr", "Momentum", "Batch", "Validation acc", "Seeds"],
                    rows, "0.6fr, 0.7fr, 1fr, 0.8fr, 1.6fr, 0.7fr")
+
+
+def _key(agg: str, atk: str) -> str:
+    return f"{agg.split()[0].lower().replace('-', '')}_{atk.replace('-', '').lower()}"
+
+
+SCENARIOS_3 = (("none", 0.0), ("sign-flip", 0.2), ("ALIE", 0.2))
+
+
+def cifar10(data: Data, m: Dict[str, str]) -> Optional[Tuple[str, str]]:
+    if not data.count("cifar10"):
+        return None
+    info = data.con.execute(
+        "SELECT max(num_rounds), count(DISTINCT seed), min(seed), max(seed) FROM runs WHERE experiment_type='cifar10'"
+    ).fetchone()
+    m["cifar_rounds"], m["cifar_seeds"] = str(info[0]), str(info[1])
+    m["cifar_seed_range"] = f"{info[2]} to {info[3]}"
+    kb = data.con.execute("SELECT avg(bytes_per_client_round) / 1024 FROM runs WHERE experiment_type='cifar10' "
+                          "AND wire_precision='Float32'").fetchone()[0]
+    kb8 = data.con.execute("SELECT avg(bytes_per_client_round) / 1024 FROM runs WHERE experiment_type='cifar10' "
+                           "AND wire_precision='INT8' AND attack='none'").fetchone()[0]
+    if kb and kb8:
+        m["cifar_kb_f32"], m["cifar_kb_int8"] = f"{kb:.1f}", f"{kb8:.1f}"
+    cost = data.con.execute("""
+        SELECT avg(wall_clock_sec / num_rounds) FILTER (WHERE experiment_type = 'cifar10'),
+               avg(wall_clock_sec / num_rounds) FILTER (WHERE experiment_type = 'cnn')
+        FROM runs WHERE torch_threads = 2""").fetchone()
+    if cost[0] and cost[1]:
+        m["cifar_cost_ratio"] = f"{cost[0] / cost[1]:.1f}"
+    rows, robust_diffs = [], []
+    for agg in AGGS:
+        for atk, share in SCENARIOS_3:
+            base = (f"experiment_type='cifar10' AND aggregator='{agg}' AND attack='{atk}' "
+                    f"AND abs(attacker_share - {share}) < 1e-9")
+            f32 = _seeds_acc(data, base + " AND wire_precision='Float32'")
+            i8 = _seeds_acc(data, base + " AND wire_precision='INT8'")
+            res = _paired(i8, f32)
+            rows.append([agg, _scen(atk, share), _ms(list(f32.values())), _ms(list(i8.values())),
+                         f"{res['mean_diff']:+.2f}" if res else "n/a"])
+            k = _key(agg, atk)
+            if i8:
+                m[f"cifar_{k}_int8"] = f"{np.mean(list(i8.values())):.2f}"
+            if f32:
+                m[f"cifar_{k}_f32"] = f"{np.mean(list(f32.values())):.2f}"
+            if res:
+                m[f"cifar_{k}_diff"] = f"{res['mean_diff']:+.2f}"
+                if agg != "FedAvg":
+                    robust_diffs.append((abs(res["mean_diff"]), agg, _scen(atk, share), res["mean_diff"]))
+    if robust_diffs:
+        top = max(robust_diffs)
+        m["cifar_max_abs_robust"] = f"{top[0]:.2f}"
+        m["cifar_max_abs_case"] = f"{top[1]}, {top[2]}"
+        m["cifar_n_robust"] = str(len(robust_diffs))
+        m["cifar_n_over_margin"] = str(sum(1 for d in robust_diffs if d[0] > EQUIV_MARGIN))
+        m["cifar_n_neg"] = str(sum(1 for d in robust_diffs if d[3] < 0))
+        m["cifar_min_p"] = f"{2 / 2 ** int(m['cifar_seeds']):.2f}"
+    return _tables("table_cifar", ["Aggregator", "Setting", "Float32", "INT8", "Diff"], rows,
+                   "1.6fr, 1.2fr, 1.4fr, 1.4fr, 0.8fr")
+
+
+def tuned(data: Data, m: Dict[str, str]) -> Optional[Tuple[str, str]]:
+    if not data.count("tuned"):
+        return None
+    lr, mom, bs, n_seeds = data.con.execute(
+        "SELECT any_value(lr), any_value(momentum), any_value(batch_size), count(DISTINCT seed) "
+        "FROM runs WHERE experiment_type='tuned'").fetchone()
+    m["tuned_setting"] = f"lr {lr:g}, momentum {mom:g}, batch {bs}"
+    m["tuned_seeds"] = str(n_seeds)
+    rows, gains, robust_diffs = [], [], []
+    for agg in AGGS:
+        for atk, share in SCENARIOS_3:
+            cond = f"aggregator='{agg}' AND attack='{atk}' AND abs(attacker_share - {share}) < 1e-9"
+            old_exp = "strong_attacks" if atk == "ALIE" else "grid"
+            old = f"experiment_type='{old_exp}' AND dirichlet_alpha = 0.5 AND seed BETWEEN 0 AND 4 AND {cond}"
+            new = f"experiment_type='tuned' AND {cond}"
+            o32 = _seeds_acc(data, old + " AND wire_precision='Float32'")
+            o8 = _seeds_acc(data, old + " AND wire_precision='INT8'")
+            n32 = _seeds_acc(data, new + " AND wire_precision='Float32'")
+            n8 = _seeds_acc(data, new + " AND wire_precision='INT8'")
+            res = _paired(n8, n32)
+            rows.append([agg, _scen(atk, share),
+                         _fmt(float(np.mean(list(o32.values())))) if o32 else "n/a",
+                         _fmt(float(np.mean(list(o8.values())))) if o8 else "n/a",
+                         _ms(list(n32.values())), _ms(list(n8.values())),
+                         f"{res['mean_diff']:+.2f}" if res else "n/a",
+                         _p(res["p_perm"]) if res else "n/a"])
+            k = _key(agg, atk)
+            if n8:
+                m[f"tuned_{k}_int8"] = f"{np.mean(list(n8.values())):.2f}"
+            if n32:
+                m[f"tuned_{k}_f32"] = f"{np.mean(list(n32.values())):.2f}"
+            if o32 and n32:
+                m[f"tuned_{k}_gain"] = f"{np.mean(list(n32.values())) - np.mean(list(o32.values())):+.2f}"
+                if agg != "FedAvg" or atk != "sign-flip":
+                    gains.append(np.mean(list(n32.values())) - np.mean(list(o32.values())))
+            if res:
+                m[f"tuned_{k}_diff"] = f"{res['mean_diff']:+.2f}"
+                m[f"tuned_{k}_p"] = _p(res["p_perm"])
+                if agg != "FedAvg":
+                    robust_diffs.append((abs(res["mean_diff"]), agg, _scen(atk, share), res["mean_diff"]))
+    if gains:
+        m["tuned_gain_min"], m["tuned_gain_max"] = f"{min(gains):+.2f}", f"{max(gains):+.2f}"
+    if robust_diffs:
+        top = max(robust_diffs)
+        m["tuned_max_abs_robust"] = f"{top[0]:.2f}"
+        m["tuned_max_abs_case"] = f"{top[1]}, {top[2]}"
+        m["tuned_coord_n_neg"] = str(sum(1 for d in robust_diffs if d[1] == "Coordinate median" and d[3] < 0))
+        m["tuned_coord_n"] = str(sum(1 for d in robust_diffs if d[1] == "Coordinate median"))
+    return _tables("table_tuned", ["Aggregator", "Setting", f"Batch 128 Float32", f"Batch 128 INT8",
+                                   f"Batch {bs} Float32", f"Batch {bs} INT8", "Diff", "p"], rows,
+                   "1.5fr, 1.1fr, 0.9fr, 0.9fr, 1.2fr, 1.2fr, 0.7fr, 0.6fr")
 
 
 def _has_table(con: duckdb.DuckDBPyConnection, name: str) -> bool:
@@ -471,11 +587,20 @@ SECTIONS = [
     ("table_cnn", "3.11. A Second Model: Small CNN",
      "Final test accuracy of a 20,522-parameter CNN, mean +- standard deviation. This study uses fewer "
      "seeds and rounds than the MLP grid to limit CPU time."),
-    ("table_long", "3.12. Longer Training: 150 Rounds",
-     "Mean test accuracy over seeds 0 to 4 at rounds 50, 100 and 150."),
-    ("table_tuning", "3.13. Hyperparameter Check on a Validation Split",
+    ("table_cifar", "3.12. A Second Dataset: CIFAR-10",
+     "Final test accuracy of a 30,138-parameter CNN on CIFAR-10 (20 clients, alpha 0.5), mean +- "
+     "standard deviation. Diff is INT8 minus Float32, paired by seed. Fewer seeds and rounds than the "
+     "MLP grid to limit CPU time."),
+    ("table_long", "3.13. Longer Training: 150 Rounds",
+     "Mean test accuracy over seeds 0 to 4 at rounds 50, 100 and 150, and the gain over the last 50 "
+     "rounds as a convergence check."),
+    ("table_tuning", "3.14. Hyperparameter Check on a Validation Split",
      "Clean FedAvg, Float32. 10,000 training images are held out as a validation set before "
      "partitioning; accuracy here is validation accuracy, not test accuracy."),
+    ("table_tuned", "3.15. Rerun at the Best Validation Setting",
+     "MLP, alpha 0.5, seeds 0 to 4. Batch 128 columns are the means of the matching main-grid and ALIE "
+     "runs; the other columns rerun the same settings at the best setting from Section 3.14. Diff is "
+     "INT8 minus Float32 at the new setting, paired by seed; p is the exact permutation p-value."),
 ]
 
 
@@ -492,6 +617,8 @@ def build(con: duckdb.DuckDBPyConnection, figure_dirs: List[Path]) -> Tuple[str,
         "table_cnn": cnn(data, m),
         "table_long": long_run(data, m),
         "table_tuning": tuning(data, m),
+        "table_cifar": cifar10(data, m),
+        "table_tuned": tuned(data, m),
     }
     md_parts, typ_parts = [], []
     for name, title, caption in SECTIONS:

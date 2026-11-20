@@ -80,7 +80,7 @@ extensions:
     scenarios: [[none, 0.0], [sign-flip, 0.20], [ALIE, 0.20]]
     precisions: [INT4, Sign]
 
-  # A second model on the same data. A CNN round costs about 4 times an MLP round on
+  # A second model on the same data. A CNN round costs about 6 times an MLP round on
   # this CPU, so this study uses 3 seeds and 30 rounds.
   cnn:
     num_rounds: 30
@@ -106,3 +106,23 @@ extensions:
     batch_sizes: [64, 128]
     seeds: [0, 1, 2]
     validation_size: 10000
+
+  # Second dataset. A small CNN for 32x32 RGB images, 50 rounds like the main grid,
+  # 3 seeds to limit CPU time.
+  cifar10:
+    model: cnn_cifar
+    num_rounds: 50
+    seeds: [0, 1, 2]
+    aggregators: ["FedAvg", "Multi-Krum", "Coordinate median", "Trimmed mean"]
+    scenarios: [["none", 0.0], ["sign-flip", 0.2], ["ALIE", 0.2]]
+    precisions: ["Float32", "INT8"]
+
+  # Rerun of key scenarios at the best validation setting from the tuning study
+  # (lr 0.05, momentum 0.9, batch 64), to check the INT8 result does not depend on batch size.
+  tuned:
+    lr: 0.05
+    momentum: 0.9
+    batch_size: 64
+    aggregators: ["FedAvg", "Multi-Krum", "Coordinate median", "Trimmed mean"]
+    scenarios: [["none", 0.0], ["sign-flip", 0.2], ["ALIE", 0.2]]
+    precisions: ["Float32", "INT8"]

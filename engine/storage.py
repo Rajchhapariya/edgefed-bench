@@ -1,6 +1,6 @@
 """Data partitioning, Parquet shards and DuckDB access.
 
-Fashion-MNIST is split across clients with a Dirichlet distribution and written to one
+Fashion-MNIST (or CIFAR-10) is split across clients with a Dirichlet distribution and written to one
 Parquet file per client. EdgeStore reads shards through DuckDB. TelemetryEngine logs
 per-round telemetry from simulate.py.
 """
@@ -27,6 +27,34 @@ DEFAULT_SEED = 42
 # partition's random stream.
 _VALIDATION_SEED_OFFSET = 7919
 
+DEFAULT_DATASET = "fashion_mnist"
+DATASETS = ("fashion_mnist", "cifar10")
+
+
+def dataset_root(data_root: Union[str, Path], dataset: str = DEFAULT_DATASET) -> Path:
+    """Root folder for one dataset. Fashion-MNIST keeps the original layout under data/;
+    any other dataset gets its own subfolder, with its own cache, shards and test file."""
+    if dataset not in DATASETS:
+        raise ValueError(f"Unknown dataset: {dataset}. Choose from {DATASETS}.")
+    return Path(data_root) if dataset == DEFAULT_DATASET else Path(data_root) / dataset
+
+
+def _feature_matrix(column: Any) -> np.ndarray:
+    """Stacks a features column into float32. CIFAR-10 is stored as uint8 to keep shards
+    small; it is scaled to [0, 1] here, the same range as Fashion-MNIST."""
+    arr = np.stack(column)
+    if arr.dtype == np.uint8:
+        return arr.astype(np.float32) / 255.0
+    return arr.astype(np.float32)
+
+
+def _feature_array(x: np.ndarray) -> pa.Array:
+    """Parquet list column for a feature matrix."""
+    if x.dtype == np.uint8:
+        offsets = pa.array(np.arange(0, (len(x) + 1) * x.shape[1], x.shape[1], dtype=np.int32))
+        return pa.ListArray.from_arrays(offsets, pa.array(x.reshape(-1)))
+    return pa.array(x.tolist(), type=pa.list_(pa.float32()))
+
 
 def client_shard_dir(
     data_root: Union[str, Path],
@@ -50,7 +78,7 @@ def client_shard_dir(
 
 
 class DataPartitioner:
-    """Loads Fashion-MNIST, splits it across clients and writes the Parquet shards."""
+    """Loads the dataset, splits it across clients and writes the Parquet shards."""
 
     def __init__(self, data_root: str = "data"):
         self.data_root = Path(data_root)
@@ -94,6 +122,21 @@ class DataPartitioner:
         y_test = test_ds.targets.numpy().astype(np.int64)
 
         return x_train, y_train, x_test, y_test
+
+    def load_cifar10(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Loads CIFAR-10 (50,000 train, 10,000 test) as uint8 rows of 3,072 values in
+        channel-first order (3 x 32 x 32). Scaling to [0, 1] happens when shards are read."""
+        train_ds = datasets.CIFAR10(root=str(self.cache_dir), train=True, download=True)
+        test_ds = datasets.CIFAR10(root=str(self.cache_dir), train=False, download=True)
+
+        def rows(data: np.ndarray) -> np.ndarray:
+            return np.ascontiguousarray(data.transpose(0, 3, 1, 2)).reshape(len(data), -1).astype(np.uint8)
+
+        return (rows(train_ds.data), np.asarray(train_ds.targets, dtype=np.int64),
+                rows(test_ds.data), np.asarray(test_ds.targets, dtype=np.int64))
+
+    def load_dataset(self, dataset: str = DEFAULT_DATASET) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        return self.load_cifar10() if dataset == "cifar10" else self.load_fashion_mnist()
 
     def partition_dirichlet(
         self,
@@ -188,7 +231,7 @@ class DataPartitioner:
                     pa.array([client_id] * num_samples, type=pa.int32()),
                     pa.array(indices, type=pa.int64()),
                     pa.array(client_labels, type=pa.int64()),
-                    pa.array(client_features.tolist(), type=pa.list_(pa.float32())),
+                    _feature_array(client_features),
                 ],
                 names=["client_id", "sample_id", "label", "features"],
             )
@@ -201,7 +244,7 @@ class DataPartitioner:
             [
                 pa.array(range(len(y_test)), type=pa.int64()),
                 pa.array(y_test, type=pa.int64()),
-                pa.array(x_test.tolist(), type=pa.list_(pa.float32())),
+                _feature_array(x_test),
             ],
             names=["sample_id", "label", "features"],
         )
@@ -221,8 +264,9 @@ class EdgeStore:
         alpha: float = 0.5,
         num_clients: int = 20,
         validation_size: int = 0,
+        dataset: str = DEFAULT_DATASET,
     ):
-        self.data_root = Path(data_root)
+        self.data_root = dataset_root(data_root, dataset)
         if clients_dir is not None:
             self.clients_dir = Path(clients_dir)
         else:
@@ -260,7 +304,7 @@ class EdgeStore:
         result = self.con.execute(query).fetchnumpy()
 
         labels = result["label"].astype(np.int64)
-        features = np.stack(result["features"]).astype(np.float32)
+        features = _feature_matrix(result["features"])
 
         return features, labels
 
@@ -291,7 +335,7 @@ class EdgeStore:
                 f"No validation split at {path}. Build the shards with validation_size > 0."
             )
         result = self.con.execute(f"SELECT label, features FROM '{path.as_posix()}'").fetchnumpy()
-        return np.stack(result["features"]).astype(np.float32), result["label"].astype(np.int64)
+        return _feature_matrix(result["features"]), result["label"].astype(np.int64)
 
     def get_test_data(self) -> Tuple[np.ndarray, np.ndarray]:
         """Fetches global test dataset via DuckDB."""
@@ -300,7 +344,7 @@ class EdgeStore:
         result = self.con.execute(query).fetchnumpy()
 
         labels = result["label"].astype(np.int64)
-        features = np.stack(result["features"]).astype(np.float32)
+        features = _feature_matrix(result["features"])
 
         return features, labels
 
@@ -442,6 +486,7 @@ def initialize_storage_pipeline(
     force_rebuild: bool = False,
     clients_dir: Optional[Union[str, Path]] = None,
     validation_size: int = 0,
+    dataset: str = DEFAULT_DATASET,
 ) -> Tuple[List[str], Dict[str, Any]]:
     """Builds the client shards for one seed, or reuses them if they match.
 
@@ -454,10 +499,12 @@ def initialize_storage_pipeline(
         clients_dir: Optional custom path for client shards (default: client_shard_dir()).
         validation_size: Training samples held out as a validation set before partitioning.
             They are drawn uniformly at random and stored as val.parquet next to the shards.
+        dataset: "fashion_mnist" (default, under data_root) or "cifar10" (under data_root/cifar10).
 
     Returns:
         Tuple of (list of parquet file paths, summary dictionary).
     """
+    data_root = str(dataset_root(data_root, dataset))
     if clients_dir is not None:
         target_clients_dir = Path(clients_dir)
     else:
@@ -473,6 +520,8 @@ def initialize_storage_pipeline(
     requested_meta = {"num_clients": int(num_clients), "alpha": float(alpha), "seed": int(seed)}
     if validation_size:
         requested_meta["validation_size"] = int(validation_size)
+    if dataset != DEFAULT_DATASET:
+        requested_meta["dataset"] = dataset
     if shards_exist and not force_rebuild:
         if meta_path.exists():
             with open(meta_path, "r", encoding="utf-8") as fh:
@@ -507,7 +556,7 @@ def initialize_storage_pipeline(
         }
 
     partitioner = DataPartitioner(data_root=data_root)
-    x_train, y_train, x_test, y_test = partitioner.load_fashion_mnist()
+    x_train, y_train, x_test, y_test = partitioner.load_dataset(dataset)
 
     train_pool = np.arange(len(y_train))
     if validation_size:
@@ -518,7 +567,7 @@ def initialize_storage_pipeline(
             [
                 pa.array(val_idx, type=pa.int64()),
                 pa.array(y_train[val_idx], type=pa.int64()),
-                pa.array(x_train[val_idx].tolist(), type=pa.list_(pa.float32())),
+                _feature_array(x_train[val_idx]),
             ],
             names=["sample_id", "label", "features"],
         )

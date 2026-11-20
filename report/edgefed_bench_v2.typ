@@ -2,7 +2,7 @@
 // which experiments/make_report_assets.py writes from results/results.duckdb.
 
 #import "metrics.typ": m
-#import "tables.typ": table_1_robustness, table_2_precision, table_3_wrong_f, table_4_multikrum, table_stats, table_mechanism, table_strong, table_alpha, table_bits, table_cnn, table_long, table_tuning
+#import "tables.typ": table_1_robustness, table_2_precision, table_3_wrong_f, table_4_multikrum, table_stats, table_mechanism, table_strong, table_alpha, table_bits, table_cnn, table_cifar, table_long, table_tuning, table_tuned
 
 // ---------------------------------------------------------------- page and type
 #set document(title: "INT8 Update Compression and Byzantine-Robust Aggregation in Federated Learning", author: "Raj Chhapariya")
@@ -53,7 +53,7 @@
   #v(0.1cm)
   #set text(size: 9pt)
   #set par(first-line-indent: 0em)
-  Edge clients in federated learning often quantize their model updates to save uplink bandwidth, while servers use Byzantine-robust aggregators to resist malicious clients. Robust aggregators decide what to keep by comparing updates, so quantization error could blur the line between honest and attacker updates. We measure whether uniform symmetric 8-bit quantization (INT8) weakens Multi-Krum, coordinate-wise median and coordinate-wise trimmed mean. We train on Fashion-MNIST split across 20 non-IID clients and report #m.all_runs runs. INT8 cuts the uplink by #m.savings%. Over #m.grid_seeds paired seeds, the 95% confidence interval of the accuracy difference between INT8 and Float32 lies within #sym.plus.minus#m.stat_margin points in #m.stat_n_equiv_robust of #m.stat_n_robust settings of the three robust aggregators. Coordinate median is the exception: INT8 lowers its accuracy in every setting, by at most #m.stat_max_abs_robust points, and 4-bit quantization lowers it much more. Logged distances explain the main result: the INT8 error of an update is #m.mech_signflip_int8_err_ratio times the distance between two honest updates, so it does not hide sign-flip attackers. Attacks that imitate honest updates (ALIE, IPM) pass Multi-Krum with or without quantization.
+  Edge clients in federated learning often quantize their model updates to save uplink bandwidth, while servers use Byzantine-robust aggregators to resist malicious clients. Robust aggregators decide what to keep by comparing updates, so quantization error could blur the line between honest and attacker updates. We measure whether uniform symmetric 8-bit quantization (INT8) weakens Multi-Krum, coordinate-wise median and coordinate-wise trimmed mean. We train on Fashion-MNIST split across 20 non-IID clients and report #m.all_runs runs. INT8 cuts the uplink by #m.savings%. Over #m.grid_seeds paired seeds, the 95% confidence interval of the accuracy difference between INT8 and Float32 lies within #sym.plus.minus#m.stat_margin points in #m.stat_n_equiv_robust of #m.stat_n_robust settings of the three robust aggregators. Coordinate median is the exception: INT8 lowers its accuracy in every setting, by at most #m.stat_max_abs_robust points, and 4-bit quantization lowers it much more. Logged distances explain the main result: the INT8 error of an update is #m.mech_signflip_int8_err_ratio times the distance between two honest updates, so it does not hide sign-flip attackers. Attacks that imitate honest updates (ALIE, IPM) pass Multi-Krum with or without quantization. Rerunning at the best validation hyperparameters keeps the largest robust-aggregator difference at #m.tuned_max_abs_robust points. A CIFAR-10 check with #m.cifar_seeds seeds shows differences up to #m.cifar_max_abs_robust points that are too noisy to test.
 
   #v(0.15cm)
   *Keywords:* federated learning, Byzantine robustness, quantization, communication efficiency, non-IID data
@@ -70,12 +70,12 @@ Quantizing updates to INT8 cuts the upload to about a quarter, but it adds a rou
 
 #pad(x: 1.2em)[_Does uniform symmetric INT8 quantization of client updates reduce the final accuracy or the attacker rejection of Multi-Krum, coordinate-wise median and coordinate-wise trimmed mean under non-IID Dirichlet label skew ($alpha = 0.5$)?_]
 
-We then check whether the answer holds when attackers imitate honest updates, when label skew is stronger or weaker, when updates use fewer bits, for a second model, and over longer training. Our contributions are:
+We then check whether the answer holds when attackers imitate honest updates, when label skew is stronger or weaker, when updates use fewer bits, for a second model and a second dataset, over longer training, and at better hyperparameters. Our contributions are:
 
 + A controlled benchmark of #m.all_runs runs with a fixed seed protocol, stored in one DuckDB file from which every number in this report is generated.
 + Paired statistics over #m.grid_seeds seeds showing no detectable INT8 effect on Multi-Krum and trimmed mean, and a small but consistent loss for coordinate median (@sec-stats).
 + Per-round distance measurements that explain why INT8 does not hide distance-based attackers (@sec-mech).
-+ Extended studies of omniscient attacks, label skew, 4-bit and 1-bit updates, a CNN, longer training and a hyperparameter check (@sec-ext).
++ Extended studies of omniscient attacks, label skew, 4-bit and 1-bit updates, a CNN, CIFAR-10, longer training, a hyperparameter check and a rerun at the best setting found (@sec-ext).
 
 We propose no new method. Prior work designs compressed robust algorithms and proves rates (@sec-related); we measure what happens with plain quantization and standard aggregators.
 
@@ -83,12 +83,12 @@ We propose no new method. Prior work designs compressed robust algorithms and pr
 = Setup <sec-setup>
 
 == Data and partitioning
-We use Fashion-MNIST: 60,000 training images, 10,000 test images, 10 classes. The training set is split across $N = 20$ clients with a Dirichlet distribution. The main grid uses $alpha = 0.5$; the label-skew study adds $alpha = 0.1$ and $alpha = 1.0$. Each split is written once to Parquet shards and read back through DuckDB (Raasveldt and Mühleisen, 2019), so every run with the same seed and $alpha$ sees the same data.
+We use Fashion-MNIST: 60,000 training images, 10,000 test images, 10 classes. The training set is split across $N = 20$ clients with a Dirichlet distribution. The main grid uses $alpha = 0.5$; the label-skew study adds $alpha = 0.1$ and $alpha = 1.0$. Each split is written once to Parquet shards and read back through DuckDB (Raasveldt and Mühleisen, 2019), so every run with the same seed and $alpha$ sees the same data. One extended study uses CIFAR-10 (Krizhevsky, 2009): 50,000 training and 10,000 test colour images of 32#sym.times\32 pixels in 10 classes, split the same way with $alpha = 0.5$.
 
 We measured the skew from the shards (seeds 0 to 4). A client holds on average #m.skew_a0p1_classes classes with at least 1% of its samples at $alpha = 0.1$, #m.skew_a0p5_classes at $alpha = 0.5$ and #m.skew_a1_classes at $alpha = 1.0$. Its largest class makes up on average #m.skew_a0p1_maxshare%, #m.skew_a0p5_maxshare% and #m.skew_a1_maxshare% of its data. For each class, our partitioner draws how that class is shared across clients. Hsu et al. (2019) instead draw a class mix for each client, so $alpha$ values are not directly comparable across papers. For the hyperparameter check only, 10,000 training images are held out as a validation set before partitioning.
 
 == Models and local training
-The main model is a multi-layer perceptron with 784 inputs, 128 ReLU hidden units and 10 outputs (101,770 parameters). The second model is a small CNN: two 5#sym.times\5 convolutions with 8 and 16 channels, each followed by ReLU and 2#sym.times\2 max pooling, then fully connected layers of 64 and 10 units (20,522 parameters). Local training is one epoch of SGD per round with learning rate $eta = 0.05$, momentum 0.9 and batch size 128. The optimizer is created fresh each round, so momentum does not carry across rounds. In round $t$, client $i$ sends
+The main model is a multi-layer perceptron with 784 inputs, 128 ReLU hidden units and 10 outputs (101,770 parameters). The second model is a small CNN: two 5#sym.times\5 convolutions with 8 and 16 channels, each followed by ReLU and 2#sym.times\2 max pooling, then fully connected layers of 64 and 10 units (20,522 parameters). For CIFAR-10 the same layout takes 3 input channels (30,138 parameters) and first normalizes each channel with fixed dataset means and standard deviations; without this step it stayed near chance in a short trial. Local training is one epoch of SGD per round with learning rate $eta = 0.05$, momentum 0.9 and batch size 128. The optimizer is created fresh each round, so momentum does not carry across rounds. In round $t$, client $i$ sends
 $ Delta bold(w)_i^((t)) = bold(w)_(i, "local")^((t)) - bold(w)_("global")^((t)). $
 
 == Wire formats
@@ -108,7 +108,7 @@ ALIE and IPM attackers see every client's true update. That is the strongest for
 *FedAvg* is the unweighted mean of all updates; clients are not weighted by sample count. *Multi-Krum* (Blanchard et al., 2017) scores each update by the sum of squared distances to its $N - f - 2$ nearest neighbours and averages the $N - f$ lowest-scoring updates; this needs $2f + 2 < N$. *Coordinate-wise median* takes the median of each coordinate. *Coordinate-wise trimmed mean* drops the $k = ceil(beta N)$ largest and $k$ smallest values of each coordinate, with $beta = f \/ N$, and averages the rest (Yin et al., 2018). Unless stated otherwise, the server is given the true $f$.
 
 == Experiments and seeds
-The main grid has #m.grid_runs runs: 4 aggregators #sym.times 2 attacks (sign-flip, Gaussian) #sym.times 3 attacker shares #sym.times 2 precisions (Float32, INT8) #sym.times #m.grid_seeds seeds (#m.grid_seed_range), plus clean runs without attackers. A wrong-f experiment adds #m.wrong_f_runs runs with the same seeds. Six extended studies add #m.ext_runs runs and use seeds 0 to 4, except the CNN, which uses #m.cnn_seeds seeds and #m.cnn_rounds rounds to limit CPU time. All other runs last 50 rounds, except the 150-round long-run study.
+The main grid has #m.grid_runs runs: 4 aggregators #sym.times 2 attacks (sign-flip, Gaussian) #sym.times 3 attacker shares #sym.times 2 precisions (Float32, INT8) #sym.times #m.grid_seeds seeds (#m.grid_seed_range), plus clean runs without attackers. A wrong-f experiment adds #m.wrong_f_runs runs with the same seeds. Eight extended studies add #m.ext_runs runs and use seeds 0 to 4, except the Fashion-MNIST CNN (#m.cnn_seeds seeds, #m.cnn_rounds rounds) and the CIFAR-10 study (#m.cifar_seeds seeds, #m.cifar_rounds rounds), which are cut to limit CPU time. All other runs last 50 rounds, except the 150-round long-run study.
 
 One seed sets the data split, the model initialization, which clients are Byzantine, the Gaussian noise and the batch order. Runs repeat bit for bit on CPU at a fixed PyTorch thread count, which is stored with each run. Seeds 0 to 4 of the main grid and the wrong-f experiment ran at 10 threads; all other runs ran at 2 threads in 8 parallel processes. A different thread count changes the order of floating-point sums and moves results slightly. Both precisions of a seed always ran at the same thread count, so the paired comparisons are not affected.
 
@@ -191,15 +191,27 @@ The CNN, with #m.cnn_seeds seeds and #m.cnn_rounds rounds, shows the same patter
 
 #figure(table_cnn, caption: [Small CNN: final accuracy (%), mean #sym.plus.minus std over #m.cnn_seeds seeds, #m.cnn_rounds rounds.]) <tab-cnn>
 
+== A second dataset: CIFAR-10
+CIFAR-10 is harder for a model this small: after #m.cifar_rounds rounds clean FedAvg reaches #m.cifar_fedavg_none_f32% with Float32 and #m.cifar_fedavg_none_int8% with INT8 (@tab-cifar). FedAvg under 20% sign-flip falls to chance, #m.cifar_fedavg_signflip_f32%. The robust aggregators keep the model training, and Multi-Krum stays closest to the clean result, at #m.cifar_multikrum_signflip_f32% with Float32 and #m.cifar_multikrum_signflip_int8% with INT8. INT8 cuts the payload from #m.cifar_kb_f32 KB to #m.cifar_kb_int8 KB per client and round.
+
+The INT8 differences are larger and noisier than on Fashion-MNIST. For the robust aggregators, INT8 minus Float32 exceeds #m.stat_margin points in #m.cifar_n_over_margin of #m.cifar_n_robust settings and is negative in #m.cifar_n_neg. The largest is #m.cifar_max_abs_robust points (#m.cifar_max_abs_case), while the seed standard deviations of coordinate median and trimmed mean under attack are several points. With #m.cifar_seeds seeds the smallest possible permutation p-value is #m.cifar_min_p, so we cannot test these differences. We read them as a reason to run more seeds on CIFAR-10, not as evidence for or against an INT8 effect. A CIFAR-10 round took #m.cifar_cost_ratio times as long as a Fashion-MNIST CNN round.
+
+#figure(table_cifar, caption: [CIFAR-10, 30,138-parameter CNN: final test accuracy (%), mean #sym.plus.minus std over #m.cifar_seeds seeds (#m.cifar_seed_range), #m.cifar_rounds rounds. Diff is INT8 minus Float32, paired by seed.]) <tab-cifar>
+
 == Longer training
-Accuracy keeps rising after round 50: from round 50 to round 150 it gains between #m.long_gain_min and #m.long_gain_max points in every setting (@tab-long). At round 150 under 20% sign-flip, INT8 minus Float32 is #m.long_diff_multikrum points for Multi-Krum, #m.long_diff_trimmed for trimmed mean and #m.long_diff_coordinate for coordinate median. The 50-round results therefore describe models that have not finished training.
+Accuracy keeps rising after round 50: from round 50 to round 150 it gains between #m.long_gain_min and #m.long_gain_max points in every setting (@tab-long). At round 150 under 20% sign-flip, INT8 minus Float32 is #m.long_diff_multikrum points for Multi-Krum, #m.long_diff_trimmed for trimmed mean and #m.long_diff_coordinate for coordinate median. The 50-round results therefore describe models that have not finished training. As a convergence check we also report the gain over the last 50 rounds, from round 100 to 150: #m.long_late_min to #m.long_late_max points. Training is slowing but has not stopped.
 
 #figure(table_long, caption: [Mean test accuracy (%) at rounds 50, 100 and 150, seeds 0 to 4.]) <tab-long>
 
 == Hyperparameter check
-On the validation split, our fixed setting (learning rate 0.05, momentum 0.9, batch 128) ranks #m.tune_default_rank of #m.tune_n_configs for clean FedAvg with Float32 (@tab-tune). It is #m.tune_gap points below the best setting, #m.tune_best, at #m.tune_best_acc% (#m.tune_seeds seeds). A batch of 64 means twice as many local steps per round. We did not rerun the other experiments with the best setting, and we did not tune for each aggregator or attack.
+On the validation split, our fixed setting (learning rate 0.05, momentum 0.9, batch 128) ranks #m.tune_default_rank of #m.tune_n_configs for clean FedAvg with Float32 (@tab-tune). It is #m.tune_gap points below the best setting, #m.tune_best, at #m.tune_best_acc% (#m.tune_seeds seeds). A batch of 64 means twice as many local steps per round. We did not tune for each aggregator or attack.
 
 #figure(table_tuning, caption: [Validation accuracy (%) of #m.tune_n_configs settings, clean FedAvg, Float32, mean #sym.plus.minus std over #m.tune_seeds seeds.]) <tab-tune>
+
+== Rerun at the best validation setting
+We reran clean, 20% sign-flip and 20% ALIE runs for all four aggregators at #m.tuned_setting, with #m.tuned_seeds seeds (@tab-tuned). Test accuracy with Float32 rises by #m.tuned_gain_min to #m.tuned_gain_max points over the batch 128 runs in every setting except FedAvg under sign-flip, which stays unstable across seeds. The comparison between INT8 and Float32 does not change. The largest INT8 minus Float32 difference for a robust aggregator is #m.tuned_max_abs_robust points (#m.tuned_max_abs_case, $p = $ #m.tuned_coordinate_signflip_p). Coordinate median is again lower with INT8 in #m.tuned_coord_n_neg of #m.tuned_coord_n settings, as in the main grid. The conclusions therefore do not depend on the slightly weaker fixed setting.
+
+#figure(table_tuned, caption: [Rerun at the best validation setting, MLP, $alpha = 0.5$, seeds 0 to 4. Batch 128 columns are means of the matching main-grid and ALIE runs. Diff is INT8 minus Float32 at the new setting, paired by seed; $p$ is the exact permutation p-value.]) <tab-tuned>
 
 // ---------------------------------------------------------------- 5
 = Related Work <sec-related>
@@ -210,18 +222,18 @@ Multi-Krum comes from Blanchard et al. (2017); coordinate-wise median and trimme
 = Limitations
 
 + *One machine.* All clients are simulated on one host (Intel Core i7-13620H), not on phones or embedded boards. We do not model network jitter, packet loss or thermal throttling.
-+ *One dataset, two small models.* Everything uses Fashion-MNIST. The CNN has fewer seeds and rounds than the MLP. Larger networks or other datasets may behave differently.
-+ *Seeds.* The main grid and the wrong-f experiment use #m.grid_seeds seeds; the extended studies use 5, and the CNN #m.cnn_seeds. The equivalence margin was chosen after seeing seeds 0 to 4.
++ *Two small datasets, small models.* The main grid uses Fashion-MNIST. The CNN studies have fewer seeds than the MLP, and the CIFAR-10 study is too small to test its INT8 differences. Larger networks or other datasets may behave differently.
++ *Seeds.* The main grid and the wrong-f experiment use #m.grid_seeds seeds; the extended studies use 5, the Fashion-MNIST CNN #m.cnn_seeds and the CIFAR-10 study #m.cifar_seeds. The equivalence margin was chosen after seeing seeds 0 to 4.
 + *The server knows $f$.* Outside the wrong-f experiment, the aggregator is given the true number of attackers, which is the best case for the defences.
 + *Omniscient strong attacks.* ALIE and IPM attackers see every client's true update.
-+ *Hyperparameters.* They were fixed before the study and checked only for clean FedAvg, where they are not the best.
++ *Hyperparameters.* They were fixed before the study and checked only for clean FedAvg. The rerun at the best setting covers 3 scenarios and 2 wire formats, not the full grid.
 + *No error feedback, no differential privacy.* INT4 and Sign run without error feedback. We add no clipping or privacy noise, which could interact with the rounding error.
-+ *50 rounds.* Accuracy is still rising at round 50.
++ *50 rounds.* Accuracy is still rising at round 50, and still rising slowly at round 150.
 
 // ---------------------------------------------------------------- 7
 = Conclusion
 
-INT8 quantization of client updates cut the uplink by #m.savings% and did not change the accuracy of Multi-Krum or trimmed mean beyond what #m.grid_seeds paired seeds can detect. Coordinate median lost a small but consistent amount, more under strong label skew and much more with INT4. The INT8 error is small next to the distances Multi-Krum relies on, which explains why distance-based attackers stay visible. Attacks that imitate honest updates pass Multi-Krum regardless of quantization, so the choice of wire format matters less than the choice of defence against them.
+INT8 quantization of client updates cut the uplink by #m.savings% and did not change the accuracy of Multi-Krum or trimmed mean beyond what #m.grid_seeds paired seeds can detect. Coordinate median lost a small but consistent amount, more under strong label skew and much more with INT4. The INT8 error is small next to the distances Multi-Krum relies on, which explains why distance-based attackers stay visible. Attacks that imitate honest updates pass Multi-Krum regardless of quantization, so the choice of wire format matters less than the choice of defence against them. The same pattern held at the best validation hyperparameters. On CIFAR-10 the INT8 differences were larger, but three seeds are too few to tell them from noise; that is the first experiment we would extend.
 
 // ---------------------------------------------------------------- references
 #v(0.4cm)
@@ -248,6 +260,8 @@ Karimireddy, S. P., He, L., & Jaggi, M. (2022). Byzantine-robust learning on het
 Karimireddy, S. P., Rebjock, Q., Stich, S. U., & Jaggi, M. (2019). Error feedback fixes SignSGD and other gradient compression schemes. _ICML 2019_.
 
 Konečný, J., McMahan, H. B., Yu, F. X., Richtárik, P., Suresh, A. T., & Bacon, D. (2016). Federated learning: Strategies for improving communication efficiency. _arXiv:1610.05492_.
+
+Krizhevsky, A. (2009). Learning multiple layers of features from tiny images. Technical report, University of Toronto.
 
 McMahan, B., Moore, E., Ramage, D., Hampson, S., & Agüera y Arcas, B. (2017). Communication-efficient learning of deep networks from decentralized data. _AISTATS 2017_, 1273--1282.
 

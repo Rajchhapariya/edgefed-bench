@@ -52,6 +52,7 @@ LEGACY_DEFAULTS = {
     "model": "mlp",
     "validation_size": 0,
     "eval_split": "test",
+    "dataset": "fashion_mnist",
 }
 # Kept for code that imported the old name.
 LEGACY_TRAINING_DEFAULTS = {k: LEGACY_DEFAULTS[k] for k in ("lr", "batch_size", "momentum")}
@@ -60,6 +61,7 @@ ATTACK_NAMES = {"sign-flip": "sign_flip", "Gaussian": "gaussian", "ALIE": "alie"
 
 EXPERIMENT_TYPES = (
     "grid", "wrong_f", "strong_attacks", "alpha_sweep", "bit_width", "cnn", "long_run", "tuning",
+    "cifar10", "tuned",
 )
 
 RUN_COLUMNS = [
@@ -69,7 +71,7 @@ RUN_COLUMNS = [
     "rounds_to_70", "total_uplink_bytes", "bytes_per_client_round", "wall_clock_sec",
     "attacker_rejection_rate", "honest_false_rejection_rate", "completed_at",
     "dirichlet_alpha", "model", "lr", "momentum", "batch_size", "validation_size",
-    "eval_split", "torch_threads",
+    "eval_split", "torch_threads", "dataset",
 ]
 
 
@@ -140,6 +142,7 @@ def init_database(db_path: Path) -> duckdb.DuckDBPyConnection:
         ("validation_size", "INTEGER", "0"),
         ("eval_split", "VARCHAR", "'test'"),
         ("torch_threads", "INTEGER", "10"),
+        ("dataset", "VARCHAR", "'fashion_mnist'"),
     ):
         con.execute(f"ALTER TABLE runs ADD COLUMN IF NOT EXISTS {column} {sql_type} DEFAULT {default}")
 
@@ -583,6 +586,21 @@ def generate_extension_configurations(config_path: Path) -> Dict[str, List[Dict[
                     [tu["aggregator"]], [["none", 0.0]], [tu["precision"]], tu["seeds"],
                     validation_size=tu["validation_size"], eval_split="val",
                 )
+
+    if "cifar10" in ext:
+        cf = ext["cifar10"]
+        out["cifar10"] = _scenario_runs(
+            "cifar10", dict(base, num_rounds=cf.get("num_rounds", base["num_rounds"])),
+            cf["aggregators"], cf["scenarios"], cf["precisions"], cf.get("seeds", seeds),
+            model=cf["model"], dataset="cifar10",
+        )
+
+    if "tuned" in ext:
+        td = ext["tuned"]
+        out["tuned"] = _scenario_runs(
+            "tuned", dict(base, lr=td["lr"], momentum=td["momentum"], batch_size=td["batch_size"]),
+            td["aggregators"], td["scenarios"], td["precisions"], td.get("seeds", seeds),
+        )
     return out
 
 
@@ -593,8 +611,9 @@ def all_configurations(config_path: Path) -> Dict[str, List[Dict[str, Any]]]:
     return out
 
 
-def partition_key(run: Dict[str, Any]) -> Tuple[int, float, int, int]:
-    return (run["seed"], float(run["dirichlet_alpha"]), run["num_clients"], run.get("validation_size", 0))
+def partition_key(run: Dict[str, Any]) -> Tuple[int, float, int, int, str]:
+    return (run["seed"], float(run["dirichlet_alpha"]), run["num_clients"], run.get("validation_size", 0),
+            run.get("dataset", "fashion_mnist"))
 
 
 def insert_run(con: duckdb.DuckDBPyConnection, chash: str, run_cfg: Dict[str, Any],
@@ -618,6 +637,7 @@ def insert_run(con: duckdb.DuckDBPyConnection, chash: str, run_cfg: Dict[str, An
         "validation_size": run_cfg.get("validation_size", 0),
         "eval_split": run_cfg.get("eval_split", "test"),
         "torch_threads": torch.get_num_threads(),
+        "dataset": run_cfg.get("dataset", "fashion_mnist"),
     }
     con.execute(
         f"INSERT INTO runs ({', '.join(RUN_COLUMNS)}) VALUES ({', '.join(['?'] * len(RUN_COLUMNS))})",
@@ -731,25 +751,26 @@ def main():
     pending = [r for i, r in enumerate(pending) if i % shard_n == shard_k]
     print(f"This process runs {len(pending)} of them (shard {shard_k}/{shard_n}).")
 
-    stores: Dict[Tuple[int, float, int, int], EdgeStore] = {}
+    stores: Dict[Tuple[int, float, int, int, str], EdgeStore] = {}
     eval_tensors: Dict[Any, Tuple[torch.Tensor, torch.Tensor]] = {}
 
     def store_for(run: Dict[str, Any]) -> EdgeStore:
         key = partition_key(run)
         if key not in stores:
-            seed, alpha, n_clients, val_size = key
+            seed, alpha, n_clients, val_size, dataset = key
             initialize_storage_pipeline(
                 data_root="data", num_clients=n_clients, alpha=alpha, seed=seed,
-                validation_size=val_size,
+                validation_size=val_size, dataset=dataset,
             )
             stores[key] = EdgeStore(data_root="data", seed=seed, alpha=alpha,
-                                    num_clients=n_clients, validation_size=val_size)
+                                    num_clients=n_clients, validation_size=val_size, dataset=dataset)
         return stores[key]
 
     def eval_for(run: Dict[str, Any], store: EdgeStore) -> Tuple[torch.Tensor, torch.Tensor]:
-        key = ("val", partition_key(run)) if run.get("eval_split", "test") == "val" else "test"
+        dataset = run.get("dataset", "fashion_mnist")
+        key = ("val", partition_key(run)) if run.get("eval_split", "test") == "val" else ("test", dataset)
         if key not in eval_tensors:
-            x, y = store.get_validation_data() if key != "test" else store.get_test_data()
+            x, y = store.get_validation_data() if key[0] == "val" else store.get_test_data()
             eval_tensors[key] = (torch.from_numpy(x).float(), torch.from_numpy(y).long())
         return eval_tensors[key]
 
@@ -764,6 +785,7 @@ def main():
             f"({run_cfg['attacker_share']*100:.0f}%) | "
             f"act_f={run_cfg['actual_f']} ass_f={run_cfg['assumed_f']} | "
             f"{run_cfg['wire_precision']} | {run_cfg.get('model', 'mlp')} | "
+            f"{run_cfg.get('dataset', 'fashion_mnist')} | "
             f"alpha={run_cfg['dirichlet_alpha']} | R={run_cfg['num_rounds']} | Seed {run_cfg['seed']}"
         )
         print(f"Executing {desc} ...", flush=True)

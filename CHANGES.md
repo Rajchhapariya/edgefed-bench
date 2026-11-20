@@ -1,6 +1,25 @@
 # Changes on Branch fix/audit-bugs
 
-Branch `fix/audit-bugs`, based on commit 293d825. The first two rounds below were committed as c192e70. The roadmap round is committed on top of it. Nothing is pushed.
+Branch `fix/audit-bugs`, based on commit 293d825. The first two rounds below were committed as c192e70. The third round is committed as 22c2f51 and the fourth on top of it. Nothing is pushed.
+
+## Fourth round: remaining roadmap items
+
+| File | Change |
+| :--- | :--- |
+| engine/storage.py | CIFAR-10 loading. Images are stored as uint8 in the Parquet shards and scaled to [0, 1] on read. Shards live under `data/cifar10/`. |
+| engine/client.py | `EdgeCIFARCNN` (30,138 parameters) with fixed per-channel input normalization. |
+| experiments/run_grid.py | `dataset` column and config key; `cifar10` and `tuned` experiments. The dataset enters the config hash only when it is not Fashion-MNIST, so stored hashes are unchanged. |
+| experiments/config.yaml | CIFAR-10 (72 runs) and a rerun at the best validation setting (120 runs). 1,624 runs in total. |
+| experiments/extended_analysis.py, make_report_assets.py, partition_stats.py | CIFAR-10 and rerun tables; gain over the last 50 rounds in the long-run table; generated key findings for both new studies; label skew per dataset. |
+| report/edgefed_bench_v2.typ | New Sections 4.5 (CIFAR-10) and 4.8 (rerun), convergence sentence in 4.6; abstract, setup, limitations and conclusion updated. 13 pages. |
+| README.md, ROADMAP.md, AUDIT_REPORT.md, results/ENVIRONMENT.md, docs/REPORT_NOTES.md | Updated to match. |
+| tests/test_extensions.py | 3 new tests: CIFAR model shape, uint8 round trip, run counts and hashes. |
+
+How we checked it:
+
+- All 1,624 configurations have distinct hashes; the 1,432 stored runs keep theirs.
+- The merged database holds 1,624 runs.
+- Both CI steps (unit tests and the config dry run) pass locally.
 
 ## Third round: roadmap items
 

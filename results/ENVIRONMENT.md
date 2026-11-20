@@ -66,3 +66,15 @@ The 1,112 runs added in version 2.1 (grid and wrong-f seeds 5 to 9, and the six 
 - **CNN cost:** 10.374 seconds per round against 1.664 for the MLP at the same thread count and load.
 - **Reproducing these runs:** use `--threads 2`. Results at 10 threads will differ slightly in the last digits.
 
+### 4.1 CIFAR-10 and the rerun at the best setting (2026-11-20)
+
+The 192 runs of the `cifar10` and `tuned` experiments ran as 8 parallel processes with 2 PyTorch threads each. 47 `tuned` runs finished in a first launch; the other 145 ran in a second launch, which took 7,566 seconds (about 2.1 hours) for the slowest process, from its log.
+
+| Experiment | Runs | Summed hours | Seconds per round |
+| :--- | :--- | :--- | :--- |
+| tuned | 120 | 3.051 | 1.831 |
+| cifar10 | 72 | 14.591 | 14.591 |
+
+- **CIFAR-10 cost:** 1.4 times the seconds per round of the Fashion-MNIST CNN at the same thread count.
+- **Download:** the first CIFAR-10 run downloads the dataset (about 170 MB) into `data/cifar10/`.
+

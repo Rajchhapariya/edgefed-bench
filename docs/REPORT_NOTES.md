@@ -12,7 +12,7 @@
 - Figures without in-figure titles and with serif labels; the caption carries the description.
 - Author-year citations with an alphabetical reference list, and the reproduction steps in an appendix.
 
-The report is 12 pages. The first version was 4 pages; version 2.1 adds the statistics, the mechanism measurements and six extended studies.
+The report is 13 pages. The first version was 4 pages; version 2.1 adds the statistics, the mechanism measurements and eight extended studies.
 
 ## Why the report does not import the shared template
 

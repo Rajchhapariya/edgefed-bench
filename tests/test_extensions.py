@@ -182,5 +182,38 @@ class TestStats(unittest.TestCase):
         np.testing.assert_allclose(adj, [0.03, 0.06, 0.06])
 
 
+class TestSecondDataset(unittest.TestCase):
+    def test_16_cifar_cnn_shape(self):
+        model = build_model("cnn_cifar")
+        self.assertEqual(sum(p.numel() for p in model.parameters()), 30138)
+        out = model(torch.zeros(4, 3072))
+        self.assertEqual(tuple(out.shape), (4, 10))
+
+    def test_17_uint8_features_roundtrip(self):
+        from engine.storage import _feature_array, _feature_matrix, dataset_root
+        x = np.random.default_rng(0).integers(0, 256, size=(5, 12), dtype=np.uint8)
+        arr = _feature_array(x)
+        back = _feature_matrix(arr.to_numpy(zero_copy_only=False))
+        np.testing.assert_allclose(back, x.astype(np.float32) / 255.0)
+        self.assertEqual(dataset_root("data"), Path("data"))
+        self.assertEqual(dataset_root("data", "cifar10"), Path("data") / "cifar10")
+        with self.assertRaises(ValueError):
+            dataset_root("data", "imagenet")
+
+    def test_18_new_experiments_and_hashes(self):
+        from experiments.run_grid import all_configurations
+        cfgs = all_configurations(Path("experiments/config.yaml"))
+        self.assertEqual(len(cfgs["cifar10"]), 72)
+        self.assertEqual(len(cfgs["tuned"]), 120)
+        self.assertTrue(all(r["dataset"] == "cifar10" and r["model"] == "cnn_cifar" for r in cfgs["cifar10"]))
+        self.assertTrue(all(r["batch_size"] == 64 for r in cfgs["tuned"]))
+        # The dataset key changes the hash only for non-default datasets.
+        base = dict(cfgs["grid"][0])
+        self.assertEqual(compute_config_hash(base), compute_config_hash(dict(base, dataset="fashion_mnist")))
+        self.assertNotEqual(compute_config_hash(base), compute_config_hash(dict(base, dataset="cifar10")))
+        hashes = [compute_config_hash(r) for runs in cfgs.values() for r in runs]
+        self.assertEqual(len(hashes), len(set(hashes)))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -613,6 +613,19 @@ def extended_findings_md(m: Dict[str, str]) -> str:
         out.append(
             f'- **Hyperparameters:** on a held-out validation split, our fixed setting ranks {m["tune_default_rank"]} of '
             f'{m["tune_n_configs"]} for clean FedAvg, {m["tune_gap"]} points below the best ({m["tune_best"]}).')
+    if "tuned_max_abs_robust" in m:
+        out.append(
+            f'- **Rerun at the best setting ({m["tuned_setting"]}):** Float32 accuracy rises by {m["tuned_gain_min"]} to '
+            f'{m["tuned_gain_max"]} points over batch 128 in every setting except FedAvg under sign-flip. The largest INT8 minus Float32 '
+            f'difference for a robust aggregator is {m["tuned_max_abs_robust"]} points ({m["tuned_max_abs_case"]}); '
+            f'coordinate median is again lower with INT8 in {m["tuned_coord_n_neg"]} of {m["tuned_coord_n"]} settings.')
+    if "cifar_max_abs_robust" in m:
+        out.append(
+            f'- **CIFAR-10 ({m["cifar_seeds"]} seeds, {m["cifar_rounds"]} rounds):** clean FedAvg reaches '
+            f'{m["cifar_fedavg_none_f32"]}% with Float32. For the robust aggregators, INT8 minus Float32 exceeds '
+            f'{m["stat_margin"]} points in {m["cifar_n_over_margin"]} of {m["cifar_n_robust"]} settings (largest '
+            f'{m["cifar_max_abs_robust"]}, {m["cifar_max_abs_case"]}) and is negative in {m["cifar_n_neg"]}. With '
+            f'{m["cifar_seeds"]} seeds the smallest possible p is {m["cifar_min_p"]}, so these differences are not tested.')
     return "\n".join(out) + ("\n" if out else "")
 
 
