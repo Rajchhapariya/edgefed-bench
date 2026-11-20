@@ -9,9 +9,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -23,7 +23,7 @@ jobs:
           pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
 
       # Fashion-MNIST is downloaded on the first run and cached between runs.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: data/cache
           key: fashion-mnist-v1

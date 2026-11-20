@@ -274,7 +274,7 @@ def alpha_sweep(data: Data, m: Dict[str, str]) -> Optional[Tuple[str, str]]:
         SELECT dirichlet_alpha, avg(classes_present), avg(max_class_share)
         FROM partition_stats WHERE validation_size = 0 AND seed BETWEEN 0 AND 4""" + (
         " AND dataset = 'fashion_mnist'" if "dataset" in [r[0] for r in data.con.execute(
-            "DESCRIBE partition_stats").fetchall()] else "") + " GROUP BY 1").fetchall()} \
+            "DESCRIBE partition_stats").fetchall()] else "") + " GROUP BY 1 ORDER BY 1").fetchall()} \
         if _has_table(data.con, "partition_stats") else {}
     for a, (c, s) in skew.items():
         m[f"skew_a{a:g}_classes".replace(".", "p")] = f"{c:.1f}"

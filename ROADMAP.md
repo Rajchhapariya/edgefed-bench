@@ -6,14 +6,14 @@ Status of the items from the audit in `AUDIT_REPORT.md`. Every item below was wo
 
 1. **More seeds and proper statistics.** Done.
    - The main grid and the wrong-f experiment now use 10 seeds (0 to 9).
-   - `experiments/stats.py` gives paired 95% confidence intervals, exact permutation p-values and Holm correction within each aggregator. Results: README 3.6, report Section 3.5.
+   - `experiments/stats.py` gives paired 95% confidence intervals, exact permutation p-values and Holm correction within each aggregator. Results: README 3.6, report Section 3.3.
    - The equivalence margin of 0.5 points was chosen after seeing seeds 0 to 4. Seeds 5 to 9 are reported separately as a confirmation.
 2. **Validation split and hyperparameter source.** Done.
    - 10,000 training images are held out as a validation split. 20 settings of learning rate, momentum and batch size were scored on it for clean FedAvg (README 3.14, report Section 4.7).
    - The fixed setting ranks 6 of 20. The best setting (lr 0.05, momentum 0.9, batch 64) was rerun for all four aggregators, clean, 20% sign-flip and 20% ALIE, Float32 and INT8, seeds 0 to 4: 120 runs (README 3.15, report Section 4.8). The largest INT8 minus Float32 difference for a robust aggregator is 0.38 points.
    - Where the original values came from: Not found in available documents.
 3. **Measure the mechanism.** Done.
-   - Every attacked run added in version 2.1 logs honest-to-honest distance, honest-to-attacker distance and the codec error per round (`round_mechanism` table; README 3.7, report Section 3.6).
+   - Every attacked run added in version 2.1 logs honest-to-honest distance, honest-to-attacker distance and the codec error per round (`round_mechanism` table; README 3.7, report Section 3.4).
 4. **A stronger attack.** Done.
    - ALIE and IPM, both omniscient (README 3.8, report Section 4.1).
 

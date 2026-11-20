@@ -46,7 +46,7 @@ A single-run benchmark profile consisting of 50 communication rounds across 20 e
 
 ## 4. Extended Study (2026-11-19 to 2026-11-20)
 
-The 1,112 runs added in version 2.1 (grid and wrong-f seeds 5 to 9, and the six extended studies) ran as 8 parallel processes with 2 PyTorch threads each, 139 runs per process. Each run's thread count is stored in the `torch_threads` column of `runs`.
+The 1,112 runs added in version 2.1 (grid and wrong-f seeds 5 to 9, and the first six extended studies) ran as 8 parallel processes with 2 PyTorch threads each, 139 runs per process. Each run's thread count is stored in the `torch_threads` column of `runs`.
 
 - **Elapsed time:** 15,148 seconds (about 4.2 hours) for the slowest process, from its log.
 - **Summed run time (from `wall_clock_sec`):** 33.272 hours over the 1,112 runs. Because 8 processes shared the CPU, per-run times are longer than a run would take alone.

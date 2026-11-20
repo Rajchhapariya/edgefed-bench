@@ -139,7 +139,7 @@ Gaps from section 5:
 | 3. Scope | Added ALIE, IPM, alpha 0.1 and 1.0, INT4, 1-bit sign, a small CNN and CIFAR-10 (3 seeds; INT8 differences up to 1.10 points, untested). |
 | 4. Methodology | Validation split added; the fixed hyperparameters rank 6 of 20 for clean FedAvg. A rerun at the best setting keeps robust-aggregator INT8 differences within 0.38 points. Hyperparameter source: Not found in available documents. FedAvg stays unweighted. |
 | 5. Related work | `docs/RELATED_WORK.md` and report Section 5. |
-| 6. Theory | The S/2 error bound is now compared with measured distances (report Section 3.6). No formal proof is added. |
+| 6. Theory | The S/2 error bound is now compared with measured distances (report Section 3.4). No formal proof is added. |
 | 7. Reproducibility notes | Thread counts recorded per run; `results/ENVIRONMENT.md` updated. |
 | 8. Build specification | Not found in available documents. |
 
