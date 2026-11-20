@@ -1,6 +1,6 @@
 # Roadmap
 
-Status of the items from the audit in `AUDIT_REPORT.md`. Every item below was worked on in version 2.1; items 2, 6, 8 and 12 were finished on 2026-11-20. Results are in `results/results.duckdb`, the README results block and `report/edgefed_bench_v2.pdf`.
+Status of the items from the audit in `AUDIT_REPORT.md`. Every item below was worked on in version 2.1; items 2, 6, 8 and 12 were finished on 2026-11-20 and merged into `main`. Results are in `results/results.duckdb`, the README results block and `report/edgefed_bench_v2.pdf`.
 
 ## Needed before writing the paper
 
@@ -33,14 +33,13 @@ Status of the items from the audit in `AUDIT_REPORT.md`. Every item below was wo
 
 10. Seed 42 shards moved to `data/clients_seed_42`. Done.
 11. Table 6 (Multi-Krum rejection) split by precision. Done.
-12. CI workflow added in `.github/workflows/tests.yml`. Its two steps (unit tests and the config dry run) pass locally. It has not run on GitHub, because nothing has been pushed.
+12. CI workflow added in `.github/workflows/tests.yml`. Done. Its two steps (unit tests and the config dry run) pass locally and on GitHub Actions.
 13. PyTorch thread count stored in the `torch_threads` column. Done.
 
 ## Open items
 
 - More seeds on CIFAR-10, where the INT8 differences are larger but untested.
 - Tuning per aggregator and attack.
-- A run on GitHub Actions (needs a push).
 - Error feedback for INT4 and Sign.
 - Testing why coordinate median loses accuracy under INT8, and much more under INT4.
 - More seeds for the extended studies. With 5 seeds the smallest possible p-value is 0.0625.

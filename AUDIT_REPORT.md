@@ -93,7 +93,7 @@ Verdicts: CONFIRMED = reproduced exactly, or the code does what the text says. M
 | Task 4: README check | Partly done. Generated block is fresh. Not done: hand-written claims outside the block (README.md:11, :16, :110, :114). Section numbering differs (reproduction is section 7, not 6). Clean-clone commands were not run in a fresh virtual environment in this audit: UNVERIFIED. |
 | Task 5: publish | `.gitignore` is correct (keeps results/results.duckdb). Remote origin exists and main equals origin/main. Whether the repo is public and renders correctly was not checked (no network use allowed): UNVERIFIED. |
 
-## 7. Status after fixes (2026-11-19, branch fix/audit-bugs, uncommitted)
+## 7. Status after fixes (2026-11-19, branch fix/audit-bugs, committed as c192e70)
 
 Sections 1 to 6 describe commit 293d825. This section records what has changed since.
 
@@ -122,7 +122,7 @@ Removed: `verify_storage.py`, whose checks the storage tests cover, and `data/te
 
 Still open at that point: every gap in section 5.
 
-## 8. Status after the roadmap work (2026-11-20, branch fix/audit-bugs)
+## 8. Status after the roadmap work (2026-11-20, merged into main)
 
 | ID | Status |
 | :--- | :--- |

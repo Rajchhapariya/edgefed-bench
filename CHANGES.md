@@ -1,6 +1,19 @@
-# Changes on Branch fix/audit-bugs
+# Changes Since the Audit
 
-Branch `fix/audit-bugs`, based on commit 293d825. The first two rounds below were committed as c192e70. The third round is committed as 22c2f51 and the fourth on top of it. Nothing is pushed.
+The work below was done on branch `fix/audit-bugs`, based on commit 293d825. The first two rounds were committed as c192e70, the third as 22c2f51 and the fourth as 4287c5a. The branch was merged into `main` through pull request #1 (merge commit 9c760d8). Later fixes went straight to `main`.
+
+## After the merge
+
+| File | Change |
+| :--- | :--- |
+| README.md, report/edgefed_bench_v2.typ | Fashion-MNIST and CIFAR-10 cited, with a note on where each dataset comes from and its terms. The uplink sentence now matches its source (Konečný et al., 2016). |
+| experiments/extended_analysis.py | The label-skew query is ordered, so regenerated metrics are identical from run to run. Per-seed sign counts for the ALIE and IPM study are now computed. |
+| report/edgefed_bench_v2.typ | Section 4.1 said coordinate median was lower with INT8 "on every seed" under ALIE and IPM. It is lower in 29 of 30 seed pairs and equal in 1; the sentence now uses the computed counts. |
+| ROADMAP.md, AUDIT_REPORT.md | Report section references corrected; CI status updated. |
+| .github/workflows/tests.yml | Actions moved to their Node 24 versions (checkout v7, setup-python v7, cache v6). |
+| results/test_run.txt | Fresh test output: 57 tests, OK. |
+
+CI passes on GitHub for every commit on `main`.
 
 ## Fourth round: remaining roadmap items
 
@@ -19,7 +32,7 @@ How we checked it:
 
 - All 1,624 configurations have distinct hashes; the 1,432 stored runs keep theirs.
 - The merged database holds 1,624 runs.
-- Both CI steps (unit tests and the config dry run) pass locally.
+- Both CI steps (unit tests and the config dry run) pass locally and on GitHub Actions.
 
 ## Third round: roadmap items
 

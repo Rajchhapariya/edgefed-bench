@@ -8,7 +8,7 @@ A simulated federated learning benchmark. It measures whether INT8 compression o
 
 Edge clients face two problems at once.
 
-1. **Uplink is scarce.** Mobile and IoT clients often send over links that are up to an order of magnitude slower than the server's downlink (Konečný et al., 2016).
+1. **Uplink is scarce.** Mobile and IoT clients often have unreliable, slow connections, and the uplink is typically much slower than the downlink (Konečný et al., 2016).
 2. **Plain FedAvg trusts every client.** A few faulty or malicious clients can send updates that stop the model from converging (Blanchard et al., NeurIPS 2017).
 
 Quantizing updates to INT8 helps with the first problem, but it adds rounding error to every update. Byzantine-robust aggregators work by spotting updates that look unlike the others, so that error could in principle hide attackers or make honest clients look like outliers.
@@ -324,10 +324,10 @@ edgefed-bench/
 ├── simulate.py                   # Quick 4-regime check with telemetry logging
 ├── data/                         # Parquet client shards, test split, telemetry (generated)
 ├── engine/
-│   ├── storage.py                # Dirichlet partitioner, validation split, Parquet I/O, DuckDB EdgeStore
+│   ├── storage.py                # Fashion-MNIST and CIFAR-10 loading, Dirichlet partitioner, validation split, Parquet I/O, DuckDB EdgeStore
 │   ├── quantization.py           # Uniform symmetric INT8 quantizer and error metrics
 │   ├── compression.py            # Wire formats: Float32, INT8, INT4, 1-bit sign
-│   ├── client.py                 # MLP and CNN models, local SGD
+│   ├── client.py                 # MLP and two small CNNs, local SGD
 │   ├── adversary.py              # Sign-flip, Gaussian, ALIE and IPM attacks
 │   └── aggregator.py             # FedAvg, Coordinate Median, Trimmed Mean, Multi-Krum
 ├── experiments/
@@ -339,7 +339,7 @@ edgefed-bench/
 │   ├── extended_analysis.py      # Tables and figures for the extended study
 │   └── make_report_assets.py     # Figures, README tables, report data from the database
 ├── docs/                         # Report notes and related work
-├── results/                      # results.duckdb, figures, ENVIRONMENT.md
+├── results/                      # results.duckdb, figures, ENVIRONMENT.md, test_run.txt
 ├── report/                       # Typst report, generated tables and summary_metrics.json
 └── tests/                        # Unit and regression tests
 ```
@@ -413,7 +413,7 @@ pip install -r requirements.txt
 python -m unittest discover tests -v
 ```
 
-The tests cover storage and partitioning, the validation split, every wire format, all four attacks, all four aggregators, both models, the simulation loop, the runner and merger, and the statistics. Some tests build shards under `data/` and download Fashion-MNIST the first time. The CIFAR-10 experiment downloads CIFAR-10 (about 170 MB) into `data/cifar10/` the first time it runs.
+The tests cover storage and partitioning, the validation split, every wire format, all four attacks, all four aggregators, all three models, the simulation loop, the runner and merger, and the statistics. Some tests build shards under `data/` and download Fashion-MNIST the first time. The CIFAR-10 experiment downloads CIFAR-10 (about 170 MB) into `data/cifar10/` the first time it runs.
 
 **Datasets.** Both datasets are downloaded through torchvision at run time and are not stored in this repository; `data/` is git-ignored.
 

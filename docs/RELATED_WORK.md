@@ -32,6 +32,11 @@ Our sign-flip and Gaussian attacks are easy to detect by distance. ALIE and IPM 
 
 - Hsu, Qi and Brown (arXiv:1909.06335, 2019) build synthetic non-IID client splits with a Dirichlet distribution, with the concentration parameter controlling how similar clients are. Their construction draws a class mix for each client. Ours (`engine/storage.py`) draws, for each class, how that class is shared across clients. Alpha plays the same role in both, but the two are not identical, so alpha values are not directly comparable across papers.
 
+## Datasets
+
+- Xiao, Rasul and Vollgraf (arXiv:1708.07747, 2017): Fashion-MNIST, released by Zalando Research under the MIT License. Used for every experiment except one.
+- Krizhevsky (technical report, University of Toronto, 2009): CIFAR-10. Its download page states no license and asks users to cite this report. Used for the CIFAR-10 study.
+
 ## Earlier references kept from the first version
 
 - McMahan, Moore, Ramage, Hampson and Agüera y Arcas (AISTATS 2017): FedAvg.

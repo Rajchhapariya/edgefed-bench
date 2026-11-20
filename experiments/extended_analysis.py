@@ -239,7 +239,10 @@ def strong_attacks(data: Data, m: Dict[str, str]) -> Optional[Tuple[str, str]]:
     if not data.count("strong_attacks"):
         return None
     rows = []
+    signs: Dict[str, Dict[str, int]] = {}
     for agg in AGGS:
+        sg = signs.setdefault(agg.split()[0].lower().replace("-", ""),
+                              {"neg": 0, "pos": 0, "tie": 0, "rows": 0, "rows_neg": 0})
         for atk in ("ALIE", "IPM"):
             for share in (0.1, 0.2, 0.3):
                 base = (f"experiment_type='strong_attacks' AND aggregator='{agg}' AND attack='{atk}' "
@@ -249,6 +252,12 @@ def strong_attacks(data: Data, m: Dict[str, str]) -> Optional[Tuple[str, str]]:
                 if not f32 and not i8:
                     continue
                 res = _paired(i8, f32)
+                for sd in set(i8) & set(f32):
+                    d = i8[sd] - f32[sd]
+                    sg["neg" if d < 0 else "pos" if d > 0 else "tie"] += 1
+                if res:
+                    sg["rows"] += 1
+                    sg["rows_neg"] += res["mean_diff"] < 0
                 rej = data.con.execute(
                     f"SELECT avg(attacker_rejection_rate) * 100 FROM runs WHERE {base}").fetchone()[0]
                 rows.append([agg, f"{atk} {int(share * 100)}%", _ms(list(f32.values())),
@@ -262,6 +271,10 @@ def strong_attacks(data: Data, m: Dict[str, str]) -> Optional[Tuple[str, str]]:
                     m[f"sa_{key}_f32"] = f"{np.mean(list(f32.values())):.2f}"
                 if rej is not None:
                     m[f"sa_{key}_rej"] = f"{rej:.1f}"
+    for k, sg in signs.items():
+        m[f"sa_{k}_n_neg"], m[f"sa_{k}_n_pos"], m[f"sa_{k}_n_tie"] = str(sg["neg"]), str(sg["pos"]), str(sg["tie"])
+        m[f"sa_{k}_n_pairs"] = str(sg["neg"] + sg["pos"] + sg["tie"])
+        m[f"sa_{k}_rows"], m[f"sa_{k}_rows_neg"] = str(sg["rows"]), str(sg["rows_neg"])
     return _tables("table_strong", ["Aggregator", "Attack", "Float32", "INT8", "Diff", "p",
                                     "Multi-Krum rejection %"], rows,
                    "1.5fr, 1fr, 1.3fr, 1.3fr, 0.7fr, 0.7fr, 1.3fr")

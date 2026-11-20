@@ -64,7 +64,7 @@
 // ---------------------------------------------------------------- 1
 = Introduction
 
-In federated learning, clients train on their own data and send only model updates to a server, which combines them into a global model (McMahan et al., 2017). Edge deployments add two constraints. First, uplink is the scarce direction: phones and IoT devices send over metered cellular or low-power links, where upload is slower and costs more than download (Konečný et al., 2016). Second, plain averaging trusts every client. FedAvg takes the mean of all updates, so one arbitrary update can move the result anywhere (Blanchard et al., 2017).
+In federated learning, clients train on their own data and send only model updates to a server, which combines them into a global model (McMahan et al., 2017). Edge deployments add two constraints. First, uplink is the scarce direction: phones and IoT devices often have unreliable, slow connections, and the uplink is typically much slower than the downlink (Konečný et al., 2016). Second, plain averaging trusts every client. FedAvg takes the mean of all updates, so one arbitrary update can move the result anywhere (Blanchard et al., 2017).
 
 Quantizing updates to INT8 cuts the upload to about a quarter, but it adds a rounding error to every coordinate. Byzantine-robust aggregators decide what to keep by comparing updates, so that error could in principle make honest and attacker updates harder to tell apart. Our research question is:
 
@@ -166,7 +166,7 @@ ALIE and IPM attackers are closer to honest updates than honest updates are to e
 == Attacks built to look honest
 Multi-Krum rejected #m.sa_alie30_multikrum_rej% of ALIE updates and #m.sa_ipm30_multikrum_rej% of IPM updates at 30%, and @tab-strong shows the same at every share. Under 30% IPM, Multi-Krum ends at #m.sa_ipm30_multikrum_int8% with INT8, below FedAvg at #m.sa_ipm30_fedavg_int8%. Multi-Krum averages $N - f$ updates. Since it kept every attacker update, the updates it dropped were honest, so attackers made up a larger share of its average than of FedAvg's. Coordinate median under 30% IPM ends at #m.sa_ipm30_coordinate_int8%.
 
-With five seeds, no single row can reach $p < 0.05$. Every coordinate median row has INT8 below Float32 on every seed, the same direction as in the main grid. The other aggregators show no consistent direction.
+With five seeds, no single row can reach $p < 0.05$. Coordinate median has INT8 below Float32 in #m.sa_coordinate_rows_neg of #m.sa_coordinate_rows rows, and in #m.sa_coordinate_n_neg of #m.sa_coordinate_n_pairs seed pairs (#m.sa_coordinate_n_tie equal), the same direction as in the main grid. The other aggregators show no consistent direction: INT8 is lower in #m.sa_multikrum_n_neg of #m.sa_multikrum_n_pairs pairs for Multi-Krum and #m.sa_trimmed_n_neg of #m.sa_trimmed_n_pairs for trimmed mean.
 
 #figure(table_strong, caption: [ALIE and IPM: final accuracy (%), mean #sym.plus.minus std over seeds 0 to 4. Diff is INT8 minus Float32, paired by seed.]) <tab-strong>
 
